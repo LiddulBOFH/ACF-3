@@ -43,7 +43,7 @@ do -- ACF global vars
 	ACF.AmmoArmor			= 5 -- How many millimeters of armor ammo crates have
 	ACF.AmmoPadding         = 2 -- Millimeters of wasted space between rounds
 	ACF.AmmoMod 			= 1.05 -- Ammo modifier. 1 is 1x the amount of ammo. 0.6 default
-	ACF.AmmoCaseScale		= 1.4 -- How much larger the diameter of the case is versus the projectile (necked cartridges, M829 is 1.4, .50 BMG is 1.6) 
+	ACF.AmmoCaseScale		= 1.4 -- How much larger the diameter of the case is versus the projectile (necked cartridges, M829 is 1.4, .50 BMG is 1.6)
 	ACF.PBase 				= 875 --1KG of propellant produces this much KE at the muzzle, in kj
 	ACF.PScale 				= 1 --Gun Propellant power expotential
 	ACF.MVScale 			= 0.5 --Propellant to MV convertion expotential
@@ -86,7 +86,7 @@ do -- ACF global vars
 	ACF.LiIonED 			= 0.458 -- li-ion energy density: kw hours / liter
 	ACF.CuIToLiter 			= 0.0163871 -- cubic inches to liters
 	ACF.RefillDistance 		= 300 --Distance in which ammo crate starts refilling.
-	ACF.RefillSpeed 		= 700 -- (ACF.RefillSpeed / RoundMass) / Distance 
+	ACF.RefillSpeed 		= 700 -- (ACF.RefillSpeed / RoundMass) / Distance
 
 	--kg/liter
 	ACF.FuelDensity = {
@@ -124,6 +124,8 @@ do -- ACF global vars
 		Radial = 0.3,
 		Electric = 0.75
 	}
+
+	ACF.ThermalEntities = ACF.ThermalEntities or {}
 end
 
 do -- ACF Convars/Callbacks ------------------------

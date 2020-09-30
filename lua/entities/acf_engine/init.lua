@@ -327,6 +327,7 @@ function MakeACF_Engine(Owner, Pos, Angle, Id, Data)
 	WireLib.TriggerOutput(Engine, "Entity", Engine)
 
 	ACF_Activate(Engine)
+	ACF_AddThermalEntity(Engine,{})
 
 	Engine.ACF.LegalMass = Engine.Mass
 	Engine.ACF.Model     = Engine.Model

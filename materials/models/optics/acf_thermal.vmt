@@ -1,0 +1,16 @@
+UnlitGeneric
+{
+    $basetexture "models/optics/acf_thermal"
+
+    $color2 "[1 1 1]"
+    $blendtintcoloroverbase 1
+    $tintmasktexture "models/optics/acf_thermal"
+
+    "Proxies"
+    {
+        "ACF_Temperature"
+        {
+            "resultVar" $color2
+        }
+    }
+}
