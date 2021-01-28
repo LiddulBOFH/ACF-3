@@ -3,588 +3,651 @@ AddCSLuaFile("shared.lua")
 
 include("shared.lua")
 
-util.AddNetworkString("ACF_RefillEffect")
-util.AddNetworkString("ACF_StopRefillEffect")
-
 -- Local Vars -----------------------------------
-local CheckLegal   = ACF_CheckLegal
-local ClassLink	   = ACF.GetClassLink
-local ClassUnlink  = ACF.GetClassUnlink
-local RefillDist   = ACF.RefillDistance * ACF.RefillDistance
+
 local ActiveCrates = ACF.AmmoCrates
 local TimerCreate  = timer.Create
 local TimerExists  = timer.Exists
+local HookRun      = hook.Run
 
-local function CanRefillCrate(Crate, Target, Distance)
-	if Crate == Target then return false end
-	if not Crate.Load then return false end
-	if Crate.Damaged then return false end
-	if Target.Damaged then return false end
-	if Target.RoundType == "Refill" then return false end
-	if Target.Ammo >= Target.Capacity then return false end
+do -- Spawning and Updating --------------------
+	local CheckLegal = ACF_CheckLegal
+	local Classes = ACF.Classes
+	local Crates = Classes.Crates
+	local AmmoTypes = Classes.AmmoTypes
+	local GetClassGroup = ACF.GetClassGroup
 
-	return Distance <= RefillDist
-end
-
-local function RefillEffect(Entity, Target)
-	net.Start("ACF_RefillEffect")
-		net.WriteEntity(Entity)
-		net.WriteEntity(Target)
-	net.Broadcast()
-end
-
-local function StopRefillEffect(Entity, Target)
-	net.Start("ACF_StopRefillEffect")
-		net.WriteEntity(Entity)
-		net.WriteEntity(Target)
-	net.Broadcast()
-end
-
-local function RefillCrates(Entity)
-	local Position = Entity:GetPos()
-
-	for Crate in pairs(ActiveCrates) do
-		local Distance = Position:DistToSqr(Crate:GetPos())
-
-		if CanRefillCrate(Entity, Crate, Distance) then
-			local Supply = math.ceil((50000 / ((Crate.BulletData.ProjMass + Crate.BulletData.PropMass) * 1000)) / Distance ^ 0.5)
-			local Transfer = math.min(Supply, Crate.Capacity - Crate.Ammo)
-
-			if not Entity.SupplyingTo[Crate] then
-				Entity.SupplyingTo[Crate] = true
-
-				Crate:CallOnRemove("ACF Refill " .. Entity:EntIndex(), function()
-					Entity.SupplyingTo[Crate] = nil
-				end)
-
-				RefillEffect(Entity, Crate)
-			end
-
-			Crate:Consume(-Transfer)
-			Entity:Consume(Transfer)
-
-			if not Crate.Load then
-				local Enabled = Crate.Inputs.Load.Path and Crate.Inputs.Load.Value or 1
-
-				Crate:TriggerInput("Load", Enabled)
-			end
-
-			Crate:EmitSound("items/ammo_pickup.wav", 350, 100, 0.5)
-		end
-	end
-
-	for Crate in pairs(Entity.SupplyingTo) do
-		local Distance = Position:DistToSqr(Crate:GetPos())
-
-		if not CanRefillCrate(Entity, Crate, Distance) then
-			Entity.SupplyingTo[Crate] = nil
-
-			Crate:RemoveCallOnRemove("ACF Refill " .. Entity:EntIndex())
-
-			StopRefillEffect(Entity, Crate)
-		end
-	end
-end
-
-local function UpdateAmmoData(Entity, Data1, Data2, Data3, Data4, Data5, Data6, Data7, Data8, Data9, Data10)
-	local GunData = ACF.Weapons.Guns[Data1]
-
-	if not GunData then
-		Entity:Remove()
-		return
-	end
-
-	if Entity.Weapons and next(Entity.Weapons) then
-		local Unloaded
-
-		for Weapon in pairs(Entity.Weapons) do
-			if Weapon.CurrentCrate == Entity then
-				Unloaded = true
-
-				Weapon:Unload()
-			end
-		end
-
-		if Unloaded then
-			ACF_SendNotify(Entity:CPPIGetOwner(), false, "Crate updated while weapons were loaded with it's ammo. Weapons unloaded.")
-		end
-	end
-
-	local GunClass = ACF.Classes.GunClass[GunData.gunclass]
-	local RoundData = ACF.RoundTypes[Data2]
-
-	--Data 1 to 4 are should always be Round ID, Round Type, Propellant lenght, Projectile lenght
-	Entity.RoundId = Data1 --Weapon this round loads into, ie 140mmC, 105mmH ...
-	Entity.RoundType = RoundData and Data2 or "AP" --Type of round, IE AP, HE, HEAT ...
-	Entity.RoundPropellant = Data3 --Lenght of propellant
-	Entity.RoundProjectile = Data4 --Lenght of the projectile
-	Entity.RoundData5 = Data5 or 0
-	Entity.RoundData6 = Data6 or 0
-	Entity.RoundData7 = Data7 or 0
-	Entity.RoundData8 = Data8 or 0
-	Entity.RoundData9 = Data9 or 0
-	Entity.RoundData10 = Data10 or 0
-
-	Entity.Name = (Entity.RoundType ~= "Refill" and (Data1 .. " ") or "") .. Entity.RoundType
-	Entity.ShortName = Data1
-	Entity.EntType = Entity.RoundType
-	Entity.RoundData = RoundData or ACF.RoundTypes.AP
-
-	local PlayerData = {
-		Id = Entity.RoundId,
-		Type = Entity.RoundType,
-		PropLength = Entity.RoundPropellant,
-		ProjLength = Entity.RoundProjectile,
-		Data5 = Entity.RoundData5,
-		Data6 = Entity.RoundData6,
-		Data7 = Entity.RoundData7,
-		Data8 = Entity.RoundData8,
-		Data9 = Entity.RoundData9,
-		Data10 = Entity.RoundData10
+	local Updated = {
+		["20mmHRAC"] = "20mmRAC",
+		["30mmHRAC"] = "30mmRAC",
+		["40mmCL"] = "40mmGL",
 	}
 
-	Entity.BulletData = Entity.RoundData.convert(Entity, PlayerData)
-	Entity.BulletData.Crate = Entity:EntIndex()
+	local function VerifyData(Data)
+		if Data.RoundId then -- Updating old crates
+			Data.Weapon = Updated[Data.RoundId] or Data.RoundId
+			Data.AmmoType = Data.RoundType or "AP"
 
-	if Entity.RoundType == "Refill" then
-		Entity.SupplyingTo = Entity.SupplyingTo or {}
+			if Data.Id and Crates[Data.Id] then -- Pre scalable crate remnants
+				local Crate = Crates[Data.Id]
 
-		TimerCreate("ACF Refill " .. Entity:EntIndex(), 1, 0, function()
-			if not IsValid(Entity) then return end
+				Data.Offset = Crate.Offset
+				Data.Size = Crate.Size
+			else
+				local X = Data.RoundData11 or 24
+				local Y = Data.RoundData12 or 24
+				local Z = Data.RoundData13 or 24
 
-			RefillCrates(Entity)
-		end)
-	else
-		if Entity.SupplyingTo then
-			for Crate in pairs(Entity.SupplyingTo) do
-				StopRefillEffect(Entity, Crate)
+				Data.Size = Vector(X, Y, Z)
 			end
-
-			Entity.SupplyingTo = nil
 		end
 
-		timer.Remove("ACF Refill " .. Entity:EntIndex())
+		do -- Clamping size
+			local Size = Data.Size
+
+			if not isvector(Size) then
+				Size = Vector(Data.CrateSizeX or 24, Data.CrateSizeY or 24, Data.CrateSizeZ or 24)
+
+				Data.Size = Size
+			end
+
+			Size.x = math.Clamp(Size.x, 6, 96)
+			Size.y = math.Clamp(Size.y, 6, 96)
+			Size.z = math.Clamp(Size.z, 6, 96)
+		end
+
+		if not isstring(Data.Destiny) then
+			Data.Destiny = ACF.FindWeaponrySource(Data.Weapon) or "Weapons"
+		end
+
+		local Source = Classes[Data.Destiny]
+		local Class = GetClassGroup(Source, Data.Weapon)
+
+		if not Class then
+			Class = GetClassGroup(Classes.Weapons, "50mmC")
+
+			Data.Destiny = "Weapons"
+			Data.Weapon = "50mmC"
+		end
+
+		local Ammo = AmmoTypes[Data.AmmoType]
+
+		-- Making sure our ammo type exists and it's not blacklisted by the weapon
+		if not Ammo or Ammo.Blacklist[Class.ID] then
+			Data.AmmoType = Class.DefaultAmmo or "AP"
+
+			Ammo = AmmoTypes[Data.AmmoType]
+		end
+
+		do -- External verifications
+			Ammo:VerifyData(Data, Class) -- All ammo types should come with this function
+
+			if Class.VerifyData then
+				Class.VerifyData(Data, Class, Ammo)
+			end
+
+			HookRun("ACF_VerifyData", "acf_ammo", Data, Class, Ammo)
+		end
 	end
 
-	local Efficiency = 0.1576 * ACF.AmmoMod
-	local Volume = math.floor(Entity:GetPhysicsObject():GetVolume())
-	local CapMul = (Volume > 40250) and ((math.log(Volume * 0.00066) / math.log(2) - 4) * 0.15 + 1) or 1
-	local MassMod = Entity.BulletData.MassMod or 1
+	local function UpdateCrate(Entity, Data, Class, Weapon, Ammo)
+		local Name, ShortName, WireName = Ammo:GetCrateName()
 
-	Entity.Volume = Volume * Efficiency
-	Entity.Capacity = math.floor(CapMul * Entity.Volume * 16.38 / Entity.BulletData.RoundVolume)
-	Entity.AmmoMassMax = math.floor((Entity.BulletData.ProjMass * MassMod + Entity.BulletData.PropMass) * Entity.Capacity * 2) -- why *2 ?
-	Entity.Caliber = GunData.caliber
-	Entity.RoFMul = (Volume > 27000) and (1 - (math.log(Volume * 0.00066) / math.log(2) - 4) * 0.2) or 1 --*0.0625 for 25% @ 4x8x8, 0.025 10%, 0.0375 15%, 0.05 20% --0.23 karb edit for cannon rof 2. changed to start from 2x3x4 instead of 2x4x4
-	Entity.Spread = GunClass.spread * ACF.GunInaccuracyScale
+		Entity.Name       = Name or Weapon.Name .. " " .. Ammo.Name
+		Entity.ShortName  = ShortName or Weapon.ID .. " " .. Ammo.ID
+		Entity.EntType    = "Ammo Crate"
+		Entity.ClassData  = Class
+		Entity.WeaponData = Weapon
+		Entity.Caliber    = Weapon.Caliber
+		Entity.Class      = Class.ID
 
-	Entity:SetNWString("WireName", "ACF " .. (Entity.RoundType == "Refill" and "Ammo Refill Crate" or GunData.name .. " Ammo"))
+		Entity:SetNWString("WireName", "ACF " .. (WireName or Weapon.Name .. " Ammo Crate"))
+		Entity:SetSize(Data.Size)
 
-	Entity.RoundData.network(Entity, Entity.BulletData)
-end
+		do -- Updating round data
+			local OldAmmo = Entity.RoundData
 
-do -- Spawn Func --------------------------------
-	function MakeACF_Ammo(Player, Pos, Ang, Id, ...)
+			if OldAmmo then
+				if OldAmmo.OnLast then
+					OldAmmo:OnLast(Entity)
+				end
+
+				HookRun("ACF_OnAmmoLast", OldAmmo, Entity)
+			end
+
+			Entity.RoundData  = Ammo
+			Entity.BulletData = Ammo:ServerConvert(Data)
+			Entity.BulletData.Crate = Entity:EntIndex()
+
+			if Ammo.OnFirst then
+				Ammo:OnFirst(Entity)
+			end
+
+			HookRun("ACF_OnAmmoFirst", Ammo, Entity, Data, Class, Weapon)
+
+			Ammo:Network(Entity, Entity.BulletData)
+		end
+
+		-- Storing all the relevant information on the entity for duping
+		for _, V in ipairs(Entity.DataStore) do
+			Entity[V] = Data[V]
+		end
+
+		do -- Ammo count calculation
+			local Size = Entity:GetSize()
+			local Spacing = Weapon.Caliber * 0.0039
+			local Rounds, ExtraData = ACF.GetAmmoCrateCapacity(Size, Weapon, Entity.BulletData, Spacing, ACF.AmmoArmor)
+			local Percentage = Entity.Capacity and Entity.Ammo / math.max(Entity.Capacity, 1) or 1
+
+			Entity.Capacity    = Rounds
+			Entity.AmmoMassMax = math.floor(Entity.BulletData.CartMass * Entity.Capacity)
+			Entity.Ammo        = math.floor(Entity.Capacity * Percentage)
+
+			WireLib.TriggerOutput(Entity, "Ammo", Entity.Ammo)
+
+			Entity:SetNWInt("Ammo", Entity.Ammo)
+
+			if ExtraData then
+				local MagSize = Weapon.MagSize
+
+				-- for future use in reloading
+				--Entity.IsBoxed = ExtraData.IsBoxed -- Ammunition is boxed
+				--Entity.IsTwoPiece = ExtraData.IsTwoPiece -- Ammunition is broken down to two pieces
+
+				ExtraData.MagSize = ExtraData.IsBoxed and MagSize or 0
+				ExtraData.IsRound = not (ExtraData.IsBoxed or ExtraData.IsTwoPiece or ExtraData.IsRacked)
+				ExtraData.Capacity = Entity.Capacity
+				ExtraData.Enabled = true
+			else
+				ExtraData = { Enabled = false }
+			end
+
+			Entity.CrateData = util.TableToJSON(ExtraData)
+
+			net.Start("ACF_RequestAmmoData")
+				net.WriteEntity(Entity)
+				net.WriteString(Entity.CrateData)
+			net.Broadcast()
+		end
+
+		-- Linked weapon unloading
+		if next(Entity.Weapons) then
+			local Unloaded
+
+			for K in pairs(Entity.Weapons) do
+				if K.CurrentCrate == Entity then
+					Unloaded = true
+
+					K:Unload()
+				end
+			end
+
+			if Unloaded then
+				ACF.SendNotify(Entity.Owner, false, "Crate updated while weapons were loaded with it's ammo. Weapons unloaded.")
+			end
+		end
+
+		ACF.Activate(Entity, true) -- Makes Crate.ACF table
+
+		Entity.ACF.Model = Entity:GetModel()
+
+		Entity:UpdateMass(true)
+	end
+
+	util.AddNetworkString("ACF_RequestAmmoData")
+
+	-- Whenever a player requests ammo data, we'll send it to them
+	net.Receive("ACF_RequestAmmoData", function(_, Player)
+		local Entity = net.ReadEntity()
+
+		if IsValid(Entity) and Entity.CrateData then
+			net.Start("ACF_RequestAmmoData")
+				net.WriteEntity(Entity)
+				net.WriteString(Entity.CrateData)
+			net.Send(Player)
+		end
+	end)
+
+	hook.Add("ACF_CanUpdateEntity", "ACF Crate Size Update", function(Entity, Data)
+		if not Entity.IsAmmoCrate then return end
+		if Data.Size then return end -- The menu won't send it like this
+
+		Data.Size       = Entity:GetSize()
+		Data.CrateSizeX = nil
+		Data.CrateSizeY = nil
+		Data.CrateSizeZ = nil
+	end)
+
+	-------------------------------------------------------------------------------
+
+	function MakeACF_Ammo(Player, Pos, Ang, Data)
+		VerifyData(Data)
+
+		local Source = Classes[Data.Destiny]
+		local Class = GetClassGroup(Source, Data.Weapon)
+		local Weapon = Class.Lookup[Data.Weapon]
+		local Ammo = AmmoTypes[Data.AmmoType]
+
 		if not Player:CheckLimit("_acf_ammo") then return end
-
-		local CrateData = ACF.Weapons.Ammo[Id]
-
-		if not CrateData then return end
 
 		local Crate = ents.Create("acf_ammo")
 
 		if not IsValid(Crate) then return end
 
 		Player:AddCount("_acf_ammo", Crate)
-		Player:AddCleanup("acfmenu", Crate)
+		Player:AddCleanup("acf_ammo", Crate)
 
-		Crate:SetPos(Pos)
-		Crate:SetAngles(Ang)
+		Crate:SetModel("models/holograms/rcube_thin.mdl")
+		Crate:SetMaterial("phoenix_storms/Future_vents")
 		Crate:SetPlayer(Player)
-		Crate:SetModel(CrateData.model)
+		Crate:SetAngles(Ang)
+		Crate:SetPos(Pos)
 		Crate:Spawn()
 
-		Crate:PhysicsInit(SOLID_VPHYSICS)
-		Crate:SetMoveType(MOVETYPE_VPHYSICS)
-
-		UpdateAmmoData(Crate, ...)
-
-		Crate.IsExplosive   = true
-		Crate.Ammo			= Crate.Capacity
-		Crate.EmptyMass		= math.floor(CrateData.weight)
-		Crate.Id			= Id
-		Crate.Owner			= Player
-		Crate.Size			= Size
-		Crate.Weapons		= {}
-		Crate.Inputs		= WireLib.CreateInputs(Crate, { "Load" })
-		Crate.Outputs		= WireLib.CreateOutputs(Crate, { "Entity [ENTITY]", "Ammo", "Loading"})
-		Crate.CanUpdate		= true
-		Crate.HitBoxes 		= {
-					Main = {
-						Pos = Crate:OBBCenter(),
-						Scale = (Crate:OBBMaxs() - Crate:OBBMins()) - Vector(0.5, 0.5, 0.5),
-					}
-				}
+		Crate.Owner       = Player -- MUST be stored on ent for PP
+		Crate.IsExplosive = true
+		Crate.Weapons     = {}
+		Crate.Inputs      = WireLib.CreateInputs(Crate, { "Load" })
+		Crate.Outputs     = WireLib.CreateOutputs(Crate, { "Entity [ENTITY]", "Ammo", "Loading" })
+		Crate.DataStore	  = ACF.GetEntityArguments("acf_ammo")
 
 		WireLib.TriggerOutput(Crate, "Entity", Crate)
-		WireLib.TriggerOutput(Crate, "Ammo", Crate.Ammo)
+
+		UpdateCrate(Crate, Data, Class, Weapon, Ammo)
+
+		if Class.OnSpawn then
+			Class.OnSpawn(Crate, Data, Class, Weapon, Ammo)
+		end
+
+		HookRun("ACF_OnEntitySpawn", "acf_ammo", Crate, Data, Class, Weapon, Ammo)
+
+		Crate:UpdateOverlay(true)
+
+		-- Backwards compatibility with old crates
+		-- TODO: Update constraints on the entity if it gets moved
+		if Data.Offset then
+			local Position = Crate:LocalToWorld(Data.Offset)
+
+			Crate:SetPos(Position)
+
+			-- Updating the dupe position
+			if Data.BuildDupeInfo then
+				Data.BuildDupeInfo.PosReset = Position
+			end
+		end
+
+		do -- Mass entity mod removal
+			local EntMods = Data.EntityMods
+
+			if EntMods and EntMods.mass then
+				EntMods.mass = nil
+			end
+		end
 
 		-- Crates should be ready to load by default
 		Crate:TriggerInput("Load", 1)
 
 		ActiveCrates[Crate] = true
 
-		local Mass = Crate.EmptyMass + Crate.AmmoMassMax
-		local Phys = Crate:GetPhysicsObject()
-		if IsValid(Phys) then
-			Phys:SetMass(Mass)
-		end
-
-		ACF_Activate(Crate) -- Makes Crate.ACF table
-
-		Crate.ACF.Model 	= ACF.Weapons.Ammo[Id].model
-		Crate.ACF.LegalMass = math.floor(Mass)
-
 		CheckLegal(Crate)
-		Crate:UpdateOverlay(true)
 
 		return Crate
 	end
 
-	list.Set("ACFCvars", "acf_ammo", {"id", "data1", "data2", "data3", "data4", "data5", "data6", "data7", "data8", "data9", "data10"})
-	duplicator.RegisterEntityClass("acf_ammo", MakeACF_Ammo, "Pos", "Angle", "Id", "RoundId", "RoundType", "RoundPropellant", "RoundProjectile", "RoundData5", "RoundData6", "RoundData7", "RoundData8", "RoundData9", "RoundData10")
+	ACF.RegisterEntityClass("acf_ammo", MakeACF_Ammo, "Weapon", "AmmoType", "Size")
 	ACF.RegisterLinkSource("acf_ammo", "Weapons")
-end
 
-do -- Metamethods -------------------------------
-	do -- Inputs/Outputs/Linking ----------------
-		WireLib.AddInputAlias("Active", "Load")
-		WireLib.AddOutputAlias("Munitions", "Ammo")
+	------------------- Updating ---------------------
 
-		function ENT:TriggerInput(Name, Value)
-			if self.Disabled then return end -- Ignore input if disabled
+	function ENT:Update(Data)
+		VerifyData(Data)
 
-			if Name == "Load" then
-				self.Load = self.Ammo ~= 0 and tobool(Value)
+		local Source    = Classes[Data.Destiny]
+		local Class     = GetClassGroup(Source, Data.Weapon)
+		local OldClass  = self.ClassData
+		local Weapon    = Class.Lookup[Data.Weapon]
+		local OldWeapon = self.Weapon
+		local Ammo      = AmmoTypes[Data.AmmoType]
+		local Blacklist = Ammo.Blacklist
+		local Extra     = ""
 
-				WireLib.TriggerOutput(self, "Loading", self.Load and 1 or 0)
-			end
-
-
-			self:UpdateOverlay()
+		if OldClass.OnLast then
+			OldClass.OnLast(self, OldClass)
 		end
 
-		function ENT:Link(Target)
-			if not IsValid(Target) then return false, "Attempted to link an invalid entity." end
-			if self == Target then return false, "Can't link a crate to itself." end
-			if table.HasValue(ACF.AmmoBlacklist[self.BulletData.Type], Target.Class) then return false, "The ammo type in this crate cannot be used for this weapon." end
+		HookRun("ACF_OnEntityLast", "acf_ammo", self, OldClass)
 
-			local Function = ClassLink(self:GetClass(), Target:GetClass())
+		ACF.SaveEntity(self)
 
-			if Function then
-				return Function(self, Target)
-			end
+		UpdateCrate(self, Data, Class, Weapon, Ammo)
 
-			return false, "Crates can't be linked to '" .. Target:GetClass() .. "'."
+		ACF.RestoreEntity(self)
+
+		if Class.OnUpdate then
+			Class.OnUpdate(self, Data, Class, Weapon, Ammo)
 		end
 
-		function ENT:Unlink(Target)
-			if not IsValid(Target) then return false, "Attempted to unlink an invalid entity." end
-			if self == Target then return false, "Can't unlink a crate from itself." end
+		HookRun("ACF_OnEntityUpdate", "acf_ammo", self, Data, Class, Weapon, Ammo)
 
-			local Function = ClassUnlink(self:GetClass(), Target:GetClass())
-
-			if Function then
-				return Function(self, Target)
+		if Data.Weapon ~= OldWeapon or self.Unlinkable then
+			for Entity in pairs(self.Weapons) do
+				self:Unlink(Entity)
 			end
 
-			return false, "Crates can't be unlinked from '" .. Target:GetClass() .. "'."
+			Extra = " All weapons have been unlinked."
+		else
+			local Count = 0
+
+			for Entity in pairs(self.Weapons) do
+				if Blacklist[Entity.Class] then
+					self:Unlink(Entity)
+
+					Entity:Unload()
+
+					Count = Count + 1
+				end
+			end
+
+			-- Note: Wouldn't this just unlink all weapons anyway?
+			if Count > 0 then
+				Extra = " Unlinked " .. Count .. " weapons from this crate."
+			end
+		end
+
+		self:UpdateOverlay(true)
+
+		net.Start("ACF_UpdateEntity")
+			net.WriteEntity(self)
+		net.Broadcast()
+
+		return true, "Crate updated successfully." .. Extra
+	end
+end ---------------------------------------------
+
+do -- ACF Activation and Damage -----------------
+	local function CookoffCrate(Entity)
+		if Entity.Ammo <= 1 or Entity.Damaged < ACF.CurTime then -- Detonate when time is up or crate is out of ammo
+			Entity:Detonate()
+		elseif Entity.BulletData.Type ~= "Refill" and Entity.RoundData then -- Spew bullets out everywhere
+			local VolumeRoll = math.Rand(0, 150) > Entity.BulletData.RoundVolume ^ 0.5
+			local AmmoRoll = math.Rand(0, 1) < Entity.Ammo / math.max(Entity.Capacity, 1)
+
+			if VolumeRoll and AmmoRoll then
+				local Speed = ACF_MuzzleVelocity(Entity.BulletData.PropMass, Entity.BulletData.ProjMass / 2)
+				local Pitch = math.max(255 - Entity.BulletData.PropMass * 100,60)
+
+				Entity:EmitSound("ambient/explosions/explode_4.wav", 140, Pitch, ACF.Volume)
+
+				Entity.BulletData.Pos = Entity:LocalToWorld(Entity:OBBCenter() + VectorRand() * Entity:GetSize() * 0.5)
+				Entity.BulletData.Flight = VectorRand():GetNormalized() * Speed * 39.37 + ACF_GetAncestor(Entity):GetVelocity()
+				Entity.BulletData.Owner = Entity.Inflictor or Entity.Owner
+				Entity.BulletData.Gun = Entity
+				Entity.BulletData.Crate = Entity:EntIndex()
+
+				Entity.RoundData:Create(Entity, Entity.BulletData)
+
+				Entity:Consume()
+			end
 		end
 	end
 
-	do -- Overlay -------------------------------
-		local function Overlay(Ent)
-			if Ent.Disabled then
-				Ent:SetOverlayText("Disabled: " .. Ent.DisableReason .. "\n" .. Ent.DisableDescription)
-			else
-				local Tracer = Ent.BulletData.Tracer ~= 0 and "-T" or ""
-				local Text = "%s\n\nContents: %s ( %s / %s ) %s"
-				local AmmoData = ""
-				local Status
+	-------------------------------------------------------------------------------
 
-				if next(Ent.Weapons) or Ent.BulletData.Type == "Refill" then
-					Status = Ent.Load and "Providing Ammo" or (Ent.Ammo ~= 0 and "Idle" or "Empty")
-				else
-					Status = "Not linked to a weapon!"
-				end
+	function ENT:ACF_Activate(Recalc)
+		local PhysObj = self.ACF.PhysObj
 
-				if Ent.RoundData.cratetxt then
-					AmmoData = "\n" .. Ent.RoundData.cratetxt(Ent.BulletData)
-				end
-
-				Ent:SetOverlayText(string.format(Text, Status, Ent.BulletData.Type .. Tracer, Ent.Ammo, Ent.Capacity, AmmoData))
-			end
+		if not self.ACF.Area then
+			self.ACF.Area = PhysObj:GetSurfaceArea() * 6.45
 		end
 
-		function ENT:UpdateOverlay(Instant)
-			if Instant then
-				Overlay(self)
-				return
-			end
+		local Volume = PhysObj:GetVolume()
 
-			if not TimerExists("ACF Overlay Buffer" .. self:EntIndex()) then
-				TimerCreate("ACF Overlay Buffer" .. self:EntIndex(), 1, 1, function()
-					if IsValid(self) then
-						Overlay(self)
-					end
-				end)
-			end
+		local Armour = ACF.AmmoArmor
+		local Health = Volume / ACF.Threshold --Setting the threshold of the prop Area gone
+		local Percent = 1
+
+		if Recalc and self.ACF.Health and self.ACF.MaxHealth then
+			Percent = self.ACF.Health / self.ACF.MaxHealth
 		end
+
+		self.ACF.Health = Health * Percent
+		self.ACF.MaxHealth = Health
+		self.ACF.Armour = Armour * (0.5 + Percent / 2)
+		self.ACF.MaxArmour = Armour
+		self.ACF.Type = "Prop"
 	end
 
-	do -- Legal Checks --------------------------
-		function ENT:Enable()
-			if self.Inputs.Load.Path then
-				self.Load = tobool(self.Inputs.Load.Value)
-			else
-				self.Load = true
-			end
+	function ENT:ACF_OnDamage(Energy, FrArea, Ang, Inflictor, _, Type)
+		local Mul = (Type == "HEAT" and ACF.HEATMulAmmo) or 1 --Heat penetrators deal bonus damage to ammo
+		local HitRes = ACF.PropDamage(self, Energy, FrArea * Mul, Ang, Inflictor) --Calling the standard damage prop function
 
-			self:UpdateOverlay(true)
-			self:UpdateMass()
-		end
+		if self.Exploding or not self.IsExplosive then return HitRes end
 
-		function ENT:Disable()
-			self.Load = false
+		if HitRes.Kill then
+			if HookRun("ACF_AmmoExplode", self, self.BulletData) == false then return HitRes end
 
-			self:UpdateOverlay(true)
-			self:UpdateMass()
-		end
-	end
-
-	do -- Consuming ammo, updating mass --------
-		function ENT:Consume(Num)
-			self.Ammo = self.Ammo - (Num or 1)
-
-			self:UpdateOverlay()
-			self:UpdateMass()
-
-			if self.Ammo == 0 then
-				self:TriggerInput("Load", 0)
-			end
-
-			WireLib.TriggerOutput(self, "Ammo", self.Ammo)
-		end
-
-		function ENT:UpdateMass()
-			if TimerExists("ACF Mass Buffer" .. self:EntIndex()) then return end
-
-			TimerCreate("ACF Mass Buffer" .. self:EntIndex(), 5, 1, function()
-				if IsValid(self) then
-					self.ACF.LegalMass = math.floor(self.EmptyMass + self.AmmoMassMax * (self.Ammo / math.max(self.Capacity, 1)))
-
-					local Phys = self:GetPhysicsObject()
-
-					if IsValid(Phys) then
-						Phys:SetMass(self.ACF.LegalMass)
-					end
-				end
-			end)
-		end
-	end
-
-	do -- Misc ----------------------------------
-		local function CookoffCrate(Entity)
-			if Entity.Ammo <= 1 or Entity.Damaged < CurTime() then -- Detonate when time is up or crate is out of ammo
-				Entity:Detonate()
-			elseif Entity.BulletData.Type ~= "Refill" and Entity.RoundData then -- Spew bullets out everywhere
-				local VolumeRoll = math.Rand(0, 150) > Entity.BulletData.RoundVolume ^ 0.5
-				local AmmoRoll = math.Rand(0, 1) < Entity.Ammo / math.max(Entity.Capacity, 1)
-
-				if VolumeRoll and AmmoRoll then
-					local Speed = ACF_MuzzleVelocity(Entity.BulletData.PropMass, Entity.BulletData.ProjMass / 2, Entity.Caliber)
-
-					Entity:EmitSound("ambient/explosions/explode_4.wav", 350, math.max(255 - Entity.BulletData.PropMass * 100,60))
-
-					Entity.BulletData.Pos = Entity:LocalToWorld(Entity:OBBCenter() + VectorRand() * (Entity:OBBMaxs() - Entity:OBBMins()) / 2)
-					Entity.BulletData.Flight = (VectorRand()):GetNormalized() * Speed * 39.37 + Entity:GetVelocity()
-					Entity.BulletData.Owner = Entity.Inflictor or Entity.Owner
-					Entity.BulletData.Gun = Entity
-					Entity.BulletData.Crate = Entity:EntIndex()
-
-					Entity.RoundData.create(Entity, Entity.BulletData)
-
-					Entity:Consume()
-				end
-			end
-		end
-
-		function ENT:ACF_Activate(Recalc)
-			local PhysObj   = self.ACF.PhysObj
-			local EmptyMass = math.max(self.EmptyMass, PhysObj:GetMass() - self.AmmoMassMax)
-
-			if not self.ACF.Area then
-				self.ACF.Area = PhysObj:GetSurfaceArea() * 6.45
-			end
-
-			if not self.ACF.Volume then
-				self.ACF.Volume = PhysObj:GetVolume() * 16.38
-			end
-
-			local Armour = EmptyMass * 1000 / self.ACF.Area / 0.78 --So we get the equivalent thickness of that prop in mm if all it's weight was a steel plate
-			local Health = self.ACF.Volume / ACF.Threshold --Setting the threshold of the prop Area gone 
-			local Percent = 1
-
-			if Recalc and self.ACF.Health and self.ACF.MaxHealth then
-				Percent = self.ACF.Health / self.ACF.MaxHealth
-			end
-
-			self.ACF.Health = Health * Percent
-			self.ACF.MaxHealth = Health
-			self.ACF.Armour = Armour * (0.5 + Percent / 2)
-			self.ACF.MaxArmour = Armour
-			self.ACF.Type = nil
-			self.ACF.Mass = self.Mass
-			self.ACF.Density = (PhysObj:GetMass() * 1000) / self.ACF.Volume
-			self.ACF.Type = "Prop"
-		end
-
-		function ENT:ACF_OnDamage(Entity, Energy, FrArea, Angle, Inflictor, _, Type)
-			local Mul = (Type == "HEAT" and ACF.HEATMulAmmo) or 1 --Heat penetrators deal bonus damage to ammo
-			local HitRes = ACF.PropDamage(Entity, Energy, FrArea * Mul, Angle, Inflictor) --Calling the standard damage prop function
-
-			if self.Exploding or not self.IsExplosive then return HitRes end
-
-			if HitRes.Kill then
-				if hook.Run("ACF_AmmoExplode", self, self.BulletData) == false then return HitRes end
-
-				self.Exploding = true
-
-				if IsValid(Inflictor) and Inflictor:IsPlayer() then
-					self.Inflictor = Inflictor
-				end
-
-				if self.Ammo > 1 then
-					self:Detonate()
-
-					return HitRes
-				else
-					ACF_HEKill(self, VectorRand())
-				end
-			end
-
-
-			-- Cookoff chance
-			if self.Damaged then return HitRes end -- Already cooking off
-
-			local Ratio = (HitRes.Damage / self.BulletData.RoundVolume) ^ 0.2
-
-			if (Ratio * self.Capacity / self.Ammo) > math.Rand(0, 1) then
+			if IsValid(Inflictor) and Inflictor:IsPlayer() then
 				self.Inflictor = Inflictor
-				self.Damaged = CurTime() + (5 - Ratio * 3)
+			end
 
-				local Interval = 0.01 + self.BulletData.RoundVolume ^ 0.5 / 100
-
-				TimerCreate("ACF Crate Cookoff " .. self:EntIndex(), Interval, 0, function()
-					if not IsValid(self) then return end
-
-					CookoffCrate(self)
-				end)
+			if self.Ammo > 0 then
+				self:Detonate()
 			end
 
 			return HitRes
 		end
 
-		function ENT:Update(ArgsTable)
-			-- That table is the player data, as sorted in the ACFCvars above, with player who shot, 
-			-- and pos and angle of the tool trace inserted at the start
-			local Message = "Ammo crate updated successfully!"
+		-- Cookoff chance
+		if self.Damaged then return HitRes end -- Already cooking off
 
-			if ArgsTable[1] ~= self.Owner then return false, "You don't own that ammo crate!" end -- Argtable[1] is the player that shot the tool
-			if ArgsTable[6] == "Refill" then return false, "Refill ammo type is only avaliable for new crates!" end -- Argtable[6] is the round type. If it's refill it shouldn't be loaded into guns, so we refuse to change to it
+		local Ratio = (HitRes.Damage / self.BulletData.RoundVolume) ^ 0.2
 
-			-- Argtable[5] is the weapon ID the new ammo loads into
-			if ArgsTable[5] ~= self.RoundId then
-				for Gun in pairs(self.Weapons) do
-					self:Unlink(Gun)
-				end
+		if (Ratio * self.Capacity / self.Ammo) > math.Rand(0, 1) then
+			self.Inflictor = Inflictor
+			self.Damaged = ACF.CurTime + (5 - Ratio * 3)
 
-				Message = "New ammo type loaded, crate unlinked."
-			else -- ammotype wasn't changed, but let's check if new roundtype is blacklisted
-				local Blacklist = ACF.AmmoBlacklist[ArgsTable[6]]
+			local Interval = 0.01 + self.BulletData.RoundVolume ^ 0.5 / 100
 
-				for Gun in pairs(self.Weapons) do
-					if table.HasValue(Blacklist, Gun.Class) then
-						self:Unlink(Gun)
-						Gun:Unload()
+			TimerCreate("ACF Crate Cookoff " .. self:EntIndex(), Interval, 0, function()
+				if not IsValid(self) then return end
 
-						Message = "New round type cannot be used with linked gun, crate unlinked and gun unloaded."
-					end
-				end
-			end
-
-			local AmmoPercent = self.Ammo / math.max(self.Capacity, 1)
-
-			UpdateAmmoData(self, unpack(ArgsTable, 5, 14))
-
-			self.Ammo = math.floor(self.Capacity * AmmoPercent)
-
-			self:UpdateMass()
-			self:UpdateOverlay(true)
-
-			return true, Message
+				CookoffCrate(self)
+			end)
 		end
 
-		function ENT:Detonate()
-			debug.Trace()
-			timer.Remove("ACF Crate Cookoff " .. self:EntIndex()) -- Prevent multiple explosions
-			self.Damaged = nil -- Prevent multiple explosions
+		return HitRes
+	end
 
-			local Pos		 = self:LocalToWorld(self:OBBCenter() + VectorRand() * (self:OBBMaxs() - self:OBBMins()) / 2)
-			local Filler     = self.RoundType == "Refill" and 0.001 or self.BulletData.FillerMass or 0
-			local Propellant = self.RoundType == "Refill" and 0.001 or self.BulletData.PropMass or 0
+	function ENT:Detonate()
+		if not self.Damaged then return end
 
-			local ExplosiveMass = (Filler + Propellant * (ACF.PBase / ACF.HEPower)) * self.Ammo
-			local FragMass		= self.BulletData.ProjMass or ExplosiveMass * 0.5
+		self.Exploding = true
+		self.Damaged = nil -- Prevent multiple explosions
 
-			ACF_KillChildProps(self, Pos, ExplosiveMass)
-			ACF_HE(Pos, ExplosiveMass, FragMass, self.Inflictor, {self}, self)
+		timer.Remove("ACF Crate Cookoff " .. self:EntIndex()) -- Prevent multiple explosions
 
-			local Effect = EffectData()
-				Effect:SetOrigin(Pos)
-				Effect:SetNormal(Vector(0, 0, -1))
-				Effect:SetScale(math.max(ExplosiveMass ^ 0.33 * 8 * 39.37, 1))
-				Effect:SetRadius(0)
+		local Pos           = self:LocalToWorld(self:OBBCenter() + VectorRand() * self:GetSize() * 0.5)
+		local Filler        = self.BulletData.FillerMass or 0
+		local Propellant    = self.BulletData.PropMass or 0
+		local ExplosiveMass = (Filler + Propellant * (ACF.PBase / ACF.HEPower)) * self.Ammo
+		local FragMass      = self.BulletData.ProjMass or ExplosiveMass * 0.5
 
-			util.Effect("ACF_Explosion", Effect)
+		ACF_KillChildProps(self, Pos, ExplosiveMass)
+		ACF_HE(Pos, ExplosiveMass, FragMass, self.Inflictor, {self}, self)
 
-			constraint.RemoveAll(self)
-			self:Remove()
+		local Effect = EffectData()
+			Effect:SetOrigin(Pos)
+			Effect:SetNormal(Vector(0, 0, -1))
+			Effect:SetScale(math.max(ExplosiveMass ^ 0.33 * 8 * 39.37, 1))
+			Effect:SetRadius(0)
+
+		util.Effect("ACF_Explosion", Effect)
+
+		constraint.RemoveAll(self)
+		self:Remove()
+	end
+end ---------------------------------------------
+
+do -- Entity Inputs -----------------------------
+	WireLib.AddInputAlias("Active", "Load")
+	WireLib.AddOutputAlias("Munitions", "Ammo")
+
+	ACF.AddInputAction("acf_ammo", "Load", function(Entity, Value)
+		Entity.Load = tobool(Value)
+
+		WireLib.TriggerOutput(Entity, "Loading", Entity:CanConsume() and 1 or 0)
+	end)
+end ---------------------------------------------
+
+do -- Entity Overlay ----------------------------
+	local Text = "%s\n\nSize: %sx%sx%s\n\nContents: %s ( %s / %s )%s%s%s"
+	local BulletText = "\nCartridge Mass: %s kg\nProjectile Mass: %s kg\nPropellant Mass: %s kg"
+
+	function ENT:UpdateOverlayText()
+		local Tracer = self.BulletData.Tracer ~= 0 and "-T" or ""
+		local AmmoType = self.BulletData.Type .. Tracer
+		local X, Y, Z = self:GetSize():Unpack()
+		local AmmoInfo = self.RoundData:GetCrateText(self.BulletData)
+		local ExtraInfo = ACF.GetOverlayText(self)
+		local BulletInfo = ""
+		local Status
+
+		if next(self.Weapons) or self.IsRefill then
+			Status = self:CanConsume() and "Providing Ammo" or (self.Ammo ~= 0 and "Idle" or "Empty")
+		else
+			Status = "Not linked to a weapon!"
 		end
 
-		function ENT:OnRemove()
-			ActiveCrates[self] = nil
+		X = math.Round(X, 2)
+		Y = math.Round(Y, 2)
+		Z = math.Round(Z, 2)
 
-			if self.SupplyingTo then
-				for Crate in pairs(self.SupplyingTo) do
-					Crate:RemoveCallOnRemove("ACF Refill " .. self:EntIndex())
+		if self.BulletData.Type ~= "Refill" then
+			local Projectile = math.Round(self.BulletData.ProjMass, 2)
+			local Propellant = math.Round(self.BulletData.PropMass, 2)
+			local Cartridge  = math.Round(self.BulletData.CartMass, 2)
 
-					self.SupplyingTo[Crate] = nil
-				end
-			end
+			BulletInfo = BulletText:format(Cartridge, Projectile, Propellant)
+		end
 
-			if self.Damaged then -- Detonate immediately if cooking off
-				self:Detonate()
-			end
+		if AmmoInfo and AmmoInfo ~= "" then
+			AmmoInfo = "\n\n" .. AmmoInfo
+		end
 
-			for K in pairs(self.Weapons) do -- Unlink weapons
-				self:Unlink(K)
-			end
+		return Text:format(Status, X, Y, Z, AmmoType, self.Ammo, self.Capacity, BulletInfo, AmmoInfo, ExtraInfo)
+	end
+end ---------------------------------------------
 
-			timer.Remove("ACF Refill " .. self:EntIndex())
-			timer.Remove("ACF Crate Cookoff " .. self:EntIndex())
+do -- Mass Update -------------------------------
+	local function UpdateMass(Ent)
+		Ent.ACF.LegalMass = math.floor(Ent.EmptyMass + (Ent.AmmoMassMax * (Ent.Ammo / math.max(Ent.Capacity, 1))))
 
-			WireLib.Remove(self)
+		local Phys = Ent:GetPhysicsObject()
+
+		if IsValid(Phys) then
+			Phys:SetMass(Ent.ACF.LegalMass)
 		end
 	end
-end
+
+	-------------------------------------------------------------------------------
+
+	function ENT:UpdateMass(Instant)
+		if Instant then
+			return UpdateMass(self)
+		end
+
+		if TimerExists("ACF Mass Buffer" .. self:EntIndex()) then return end
+
+		TimerCreate("ACF Mass Buffer" .. self:EntIndex(), 5, 1, function()
+			if not IsValid(self) then return end
+
+			UpdateMass(self)
+		end)
+	end
+end ---------------------------------------------
+
+do -- Ammo Consumption -------------------------
+	function ENT:CanConsume()
+		if self.Disabled then return false end
+		if not self.Load then return false end
+		if self.Damaged then return false end
+
+		return self.Ammo > 0
+	end
+
+	function ENT:Consume(Num)
+		self.Ammo = math.Clamp(self.Ammo - (Num or 1), 0, self.Capacity)
+
+		self:UpdateOverlay()
+		self:UpdateMass()
+
+		WireLib.TriggerOutput(self, "Ammo", self.Ammo)
+		WireLib.TriggerOutput(self, "Loading", self:CanConsume() and 1 or 0)
+
+		if TimerExists("ACF Network Ammo " .. self:EntIndex()) then return end
+
+		TimerCreate("ACF Network Ammo " .. self:EntIndex(), 0.5, 1, function()
+			if not IsValid(self) then return end
+
+			self:SetNWInt("Ammo", self.Ammo)
+		end)
+	end
+end ---------------------------------------------
+
+do -- Misc --------------------------------------
+	function ENT:Enable()
+		WireLib.TriggerOutput(self, "Loading", self:CanConsume() and 1 or 0)
+
+		self:UpdateMass(true)
+	end
+
+	function ENT:Disable()
+		WireLib.TriggerOutput(self, "Loading", 0)
+
+		self:UpdateMass(true)
+	end
+
+	function ENT:OnResized(Size)
+		do -- Calculate new empty mass
+			local A = ACF.AmmoArmor * 0.039 -- Millimeters to inches
+			local ExteriorVolume = Size.x * Size.y * Size.z
+			local InteriorVolume = (Size.x - A) * (Size.y - A) * (Size.z - A) -- Math degree
+
+			local Volume = ExteriorVolume - InteriorVolume
+			local Mass   = Volume * 0.13 -- Kg of steel per inch
+
+			self.EmptyMass = Mass
+		end
+
+		self.HitBoxes = {
+			Main = {
+				Pos = self:OBBCenter(),
+				Scale = Size,
+			}
+		}
+	end
+
+	function ENT:OnRemove()
+		local Class = self.ClassData
+
+		if Class.OnLast then
+			Class.OnLast(self, Class)
+		end
+
+		HookRun("ACF_OnEntityLast", "acf_ammo", self, Class)
+
+		ActiveCrates[self] = nil
+
+		if self.RoundData.OnLast then
+			self.RoundData:OnLast(self)
+		end
+
+		self:Detonate() -- Detonate immediately if cooking off
+
+		for K in pairs(self.Weapons) do -- Unlink weapons
+			self:Unlink(K)
+		end
+
+		WireLib.Remove(self)
+	end
+end ---------------------------------------------

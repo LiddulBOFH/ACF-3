@@ -1,3 +1,5 @@
+local ACF = ACF
+
 do -- Ricochet/Penetration materials
 	local Materials = {}
 	local MatCache = {}
@@ -101,7 +103,7 @@ do -- Ricochet/Penetration materials
 	end
 end
 
-do -- Time lapse function
+do -- Unit conversion
 	local Units = {
 		{ Unit = "year", Reduction = 1970 },
 		{ Unit = "month", Reduction = 1 },
@@ -132,6 +134,347 @@ do -- Time lapse function
 				return Time .. " " .. Data.Unit .. (Time ~= 1 and "s" or "") .. " ago"
 			end
 		end
+	end
+
+	function ACF.GetProperMass(Kilograms)
+		local Unit, Mult = "g", 1000
+
+		if Kilograms >= 1000 then
+			Unit, Mult = "t", 0.001
+		elseif Kilograms >= 1 then
+			Unit, Mult = "kg", 1
+		end
+
+		return math.Round(Kilograms * Mult, 2) .. " " .. Unit
+	end
+end
+
+do -- Trace functions
+	local TraceLine = util.TraceLine
+
+	function ACF.Trace(TraceData)
+		local T = TraceLine(TraceData)
+
+		if T.HitNonWorld and ACF.CheckClips(T.Entity, T.HitPos) then
+			TraceData.filter[#TraceData.filter + 1] = T.Entity
+
+			return ACF.Trace(TraceData)
+		end
+
+		return T
+	end
+
+	-- Generates a copy of and uses it's own filter instead of using the existing one
+	function ACF.TraceF(TraceData)
+		local Original = TraceData.filter
+		local Filter = {}
+
+		if istable(Original) then
+			for K, V in pairs(Original) do Filter[K] = V end -- Quick copy
+		elseif isentity(Original) then
+			Filter[1] = Original
+		else
+			Filter = Original
+		end
+
+		TraceData.filter = Filter -- Temporarily replace filter
+
+		local T = ACF.Trace(TraceData)
+
+		TraceData.filter = Original -- Restore filter
+
+		return T, Filter
+	end
+end
+
+-- Pretty much unused, should be moved into the ACF namespace or just removed
+function switch(cases, arg)
+	local Var = cases[arg]
+
+	if Var ~= nil then return Var end
+
+	return cases.default
+end
+
+function ACF.RandomVector(Min, Max)
+	local X = math.Rand(Min.x, Max.x)
+	local Y = math.Rand(Min.y, Max.y)
+	local Z = math.Rand(Min.z, Max.z)
+
+	return Vector(X, Y, Z)
+end
+
+do -- Native type verification functions
+	function ACF.CheckNumber(Value, Default)
+		if not Value then return Default end
+
+		return tonumber(Value) or Default
+	end
+
+	function ACF.CheckString(Value, Default)
+		if Value == nil then return Default end
+
+		return tostring(Value) or Default
+	end
+end
+
+do -- Attachment storage
+	local IsUseless = IsUselessModel
+	local EntTable = FindMetaTable("Entity")
+	local Models = {}
+
+	local function GetModelData(Model, NoCreate)
+		local Table = Models[Model]
+
+		if not (Table or NoCreate) then
+			Table = {}
+
+			Models[Model] = Table
+		end
+
+		return Table
+	end
+
+	local function SaveAttachments(Model, Attachments, Clear)
+		if IsUseless(Model) then return end
+
+		local Data  = GetModelData(Model)
+		local Count = Clear and 0 or #Data
+
+		if Clear then
+			for K in pairs(Data) do Data[K] = nil end
+		end
+
+		for I, Attach in ipairs(Attachments) do
+			local Index = Count + I
+			local Name  = ACF.CheckString(Attach.Name, "Unnamed" .. Index)
+
+			Data[Index] = {
+				Index = Index,
+				Name  = Name,
+				Pos   = Attach.Pos or Vector(),
+				Ang   = Attach.Ang or Angle(),
+				Bone  = Attach.Bone,
+			}
+		end
+
+		if not next(Data) then
+			Models[Model] = nil
+		end
+	end
+
+	local function GetAttachData(Entity)
+		if not Entity.AttachData then
+			Entity.AttachData = GetModelData(Entity:GetModel(), true)
+		end
+
+		return Entity.AttachData
+	end
+
+	-------------------------------------------------------------------
+
+	function ACF.AddCustomAttachment(Model, Name, Pos, Ang, Bone)
+		if not isstring(Model) then return end
+
+		SaveAttachments(Model, {{
+			Name = Name,
+			Pos  = Pos,
+			Ang  = Ang,
+			Bone = Bone,
+		}})
+	end
+
+	function ACF.AddCustomAttachments(Model, Attachments)
+		if not isstring(Model) then return end
+		if not istable(Attachments) then return end
+
+		SaveAttachments(Model, Attachments)
+	end
+
+	function ACF.SetCustomAttachment(Model, Name, Pos, Ang, Bone)
+		if not isstring(Model) then return end
+
+		SaveAttachments(Model, {{
+			Name = Name,
+			Pos  = Pos,
+			Ang  = Ang,
+			Bone = Bone,
+		}}, true)
+	end
+
+	function ACF.SetCustomAttachments(Model, Attachments)
+		if not isstring(Model) then return end
+		if not istable(Attachments) then return end
+
+		SaveAttachments(Model, Attachments, true)
+	end
+
+	function ACF.RemoveCustomAttachment(Model, Index)
+		if not isstring(Model) then return end
+
+		local Data = GetModelData(Model, true)
+
+		if not Data then return end
+
+		table.remove(Data, Index)
+
+		if not next(Data) then
+			Models[Model] = nil
+		end
+	end
+
+	function ACF.RemoveCustomAttachments(Model)
+		if not isstring(Model) then return end
+
+		local Data = GetModelData(Model, true)
+
+		if not Data then return end
+
+		for K in pairs(Data) do
+			Data[K] = nil
+		end
+
+		Models[Model] = nil
+	end
+
+	EntTable.LegacySetModel = EntTable.LegacySetModel or EntTable.SetModel
+	EntTable.LegacyGetAttachment = EntTable.LegacyGetAttachment or EntTable.GetAttachment
+	EntTable.LegacyGetAttachments = EntTable.LegacyGetAttachments or EntTable.GetAttachments
+	EntTable.LegacyLookupAttachment = EntTable.LegacyLookupAttachment or EntTable.LookupAttachment
+
+	function EntTable:SetModel(Path, ...)
+		self:LegacySetModel(Path, ...)
+
+		self.AttachData = GetModelData(Path, true)
+	end
+
+	function EntTable:GetAttachment(Index, ...)
+		local Data = GetAttachData(self)
+
+		if not Data then
+			return self:LegacyGetAttachment(Index, ...)
+		end
+
+		local Attachment = Data[Index]
+
+		if not Attachment then return end
+
+		local Pos = Attachment.Pos
+
+		if self.Scale then
+			Pos = Pos * self.Scale
+		end
+
+		return {
+			Pos = self:LocalToWorld(Pos),
+			Ang = self:LocalToWorldAngles(Attachment.Ang),
+		}
+	end
+
+	function EntTable:GetAttachments(...)
+		local Data = GetAttachData(self)
+
+		if not Data then
+			return self:LegacyGetAttachments(...)
+		end
+
+		local Result = {}
+
+		for Index, Info in ipairs(Data) do
+			Result[Index] = {
+				id   = Index,
+				name = Info.Name,
+			}
+		end
+
+		return Result
+	end
+
+	function EntTable:LookupAttachment(Name, ...)
+		local Data = GetAttachData(self)
+
+		if not Data then
+			return self:LegacyLookupAttachment(Name, ...)
+		end
+
+		for Index, Info in ipairs(Data) do
+			if Info.Name == Name then
+				return Index
+			end
+		end
+
+		return 0
+	end
+end
+
+do -- File creation
+	function ACF.FolderExists(Path, Create)
+		if not isstring(Path) then return end
+
+		local Exists = file.Exists(Path, "DATA")
+
+		if not Exists and Create then
+			file.CreateDir(Path)
+
+			return true
+		end
+
+		return Exists
+	end
+
+	function ACF.SaveToJSON(Path, Name, Table, GoodFormat)
+		if not isstring(Path) then return end
+		if not isstring(Name) then return end
+		if not istable(Table) then return end
+
+		ACF.FolderExists(Path, true) -- Creating the folder if it doesn't exist
+
+		local FullPath = Path .. "/" .. Name
+
+		file.Write(FullPath, util.TableToJSON(Table, GoodFormat))
+	end
+
+	function ACF.LoadFromFile(Path, Name)
+		if not isstring(Path) then return end
+		if not isstring(Name) then return end
+
+		local FullPath = Path .. "/" .. Name
+
+		if not file.Exists(FullPath, "DATA") then return end
+
+		return util.JSONToTable(file.Read(FullPath, "DATA"))
+	end
+end
+
+do -- Ballistic functions
+	-- changes here will be automatically reflected in the armor properties tool
+	function ACF_CalcArmor(Area, Ductility, Mass)
+		return (Mass * 1000 / Area / 0.78) / (1 + Ductility) ^ 0.5 * ACF.ArmorMod
+	end
+
+	function ACF_MuzzleVelocity(Propellant, Mass)
+		local PEnergy = ACF.PBase * ((1 + Propellant) ^ ACF.PScale - 1)
+		local Speed = ((PEnergy * 2000 / Mass) ^ ACF.MVScale)
+		local Final = Speed -- - Speed * math.Clamp(Speed/2000,0,0.5)
+
+		return Final
+	end
+
+	function ACF_Kinetic(Speed, Mass, LimitVel)
+		LimitVel = LimitVel or 99999
+		Speed    = Speed / 39.37
+
+		local Energy = {
+			Kinetic = (Mass * (Speed ^ 2)) / 2000, --Energy in KiloJoules
+			Momentum = Speed * Mass,
+		}
+		local KE = (Mass * (Speed ^ ACF.KinFudgeFactor)) / 2000 + Energy.Momentum
+
+		Energy.Penetration = math.max(KE - (math.max(Speed - LimitVel, 0) ^ 2) / (LimitVel * 5) * (KE / 200) ^ 0.95, KE * 0.1)
+		--Energy.Penetration = math.max( KE - (math.max(Speed-LimitVel,0)^2)/(LimitVel*5) * (KE/200)^0.95 , KE*0.1 )
+		--Energy.Penetration = math.max(Energy.Momentum^ACF.KinFudgeFactor - math.max(Speed-LimitVel,0)/(LimitVel*5) * Energy.Momentum , Energy.Momentum*0.1)
+
+		return Energy
 	end
 end
 
@@ -257,6 +600,7 @@ do -- Sound aliases
 	ACF.GetSoundAlias = GetAlias
 
 	-- sound.Play hijacking
+	-- TODO: BURN THIS TO THE GROUND
 	sound.DefaultPlay = sound.DefaultPlay or sound.Play
 
 	function sound.Play(Name, ...)
@@ -298,201 +642,5 @@ do -- Sound aliases
 
 			return SoundCache[Name]
 		end
-	end
-end
-
-do -- Parentable Wire model list
-	local WireModels = {
-		["models/blacknecro/ledboard60.mdl"] = true,
-		["models/blacknecro/tv_plasma_4_3.mdl"] = true,
-		["models/bull/buttons/key_switch.mdl"] = true,
-		["models/bull/buttons/rocker_switch.mdl"] = true,
-		["models/bull/buttons/toggle_switch.mdl"] = true,
-		["models/bull/gates/capacitor.mdl"] = true,
-		["models/bull/gates/capacitor_mini.mdl"] = true,
-		["models/bull/gates/capacitor_nano.mdl"] = true,
-		["models/bull/gates/logic.mdl"] = true,
-		["models/bull/gates/logic_mini.mdl"] = true,
-		["models/bull/gates/logic_nano.mdl"] = true,
-		["models/bull/gates/microcontroller1.mdl"] = true,
-		["models/bull/gates/microcontroller1_mini.mdl"] = true,
-		["models/bull/gates/microcontroller1_nano.mdl"] = true,
-		["models/bull/gates/microcontroller2.mdl"] = true,
-		["models/bull/gates/microcontroller2_mini.mdl"] = true,
-		["models/bull/gates/microcontroller2_nano.mdl"] = true,
-		["models/bull/gates/processor.mdl"] = true,
-		["models/bull/gates/processor_mini.mdl"] = true,
-		["models/bull/gates/processor_nano.mdl"] = true,
-		["models/bull/gates/resistor.mdl"] = true,
-		["models/bull/gates/resistor_mini.mdl"] = true,
-		["models/bull/gates/resistor_nano.mdl"] = true,
-		["models/bull/gates/transistor1.mdl"] = true,
-		["models/bull/gates/transistor1_mini.mdl"] = true,
-		["models/bull/gates/transistor1_nano.mdl"] = true,
-		["models/bull/gates/transistor2.mdl"] = true,
-		["models/bull/gates/transistor2_mini.mdl"] = true,
-		["models/bull/gates/transistor2_nano.mdl"] = true,
-		["models/bull/various/gyroscope.mdl"] = true,
-		["models/bull/various/speaker.mdl"] = true,
-		["models/bull/various/subwoofer.mdl"] = true,
-		["models/bull/various/usb_socket.mdl"] = true,
-		["models/bull/various/usb_stick.mdl"] = true,
-		["models/cheeze/buttons/button_0.mdl"] = true,
-		["models/cheeze/buttons/button_1.mdl"] = true,
-		["models/cheeze/buttons/button_2.mdl"] = true,
-		["models/cheeze/buttons/button_3.mdl"] = true,
-		["models/cheeze/buttons/button_4.mdl"] = true,
-		["models/cheeze/buttons/button_5.mdl"] = true,
-		["models/cheeze/buttons/button_6.mdl"] = true,
-		["models/cheeze/buttons/button_7.mdl"] = true,
-		["models/cheeze/buttons/button_8.mdl"] = true,
-		["models/cheeze/buttons/button_9.mdl"] = true,
-		["models/cheeze/buttons/button_arm.mdl"] = true,
-		["models/cheeze/buttons/button_clear.mdl"] = true,
-		["models/cheeze/buttons/button_enter.mdl"] = true,
-		["models/cheeze/buttons/button_fire.mdl"] = true,
-		["models/cheeze/buttons/button_minus.mdl"] = true,
-		["models/cheeze/buttons/button_muffin.mdl"] = true,
-		["models/cheeze/buttons/button_plus.mdl"] = true,
-		["models/cheeze/buttons/button_reset.mdl"] = true,
-		["models/cheeze/buttons/button_set.mdl"] = true,
-		["models/cheeze/buttons/button_start.mdl"] = true,
-		["models/cheeze/buttons/button_stop.mdl"] = true,
-		["models/cheeze/pcb/pcb0.mdl"] = true,
-		["models/cheeze/pcb/pcb1.mdl"] = true,
-		["models/cheeze/pcb/pcb2.mdl"] = true,
-		["models/cheeze/pcb/pcb3.mdl"] = true,
-		["models/cheeze/pcb/pcb4.mdl"] = true,
-		["models/cheeze/pcb/pcb5.mdl"] = true,
-		["models/cheeze/pcb/pcb6.mdl"] = true,
-		["models/cheeze/pcb/pcb7.mdl"] = true,
-		["models/cheeze/pcb/pcb8.mdl"] = true,
-		["models/cheeze/wires/amd_test.mdl"] = true,
-		["models/cheeze/wires/cpu.mdl"] = true,
-		["models/cheeze/wires/cpu2.mdl"] = true,
-		["models/cheeze/wires/gyroscope.mdl"] = true,
-		["models/cheeze/wires/mini_chip.mdl"] = true,
-		["models/cheeze/wires/mini_cpu.mdl"] = true,
-		["models/cheeze/wires/mini_cpu2.mdl"] = true,
-		["models/cheeze/wires/nano_chip.mdl"] = true,
-		["models/cheeze/wires/nano_compare.mdl"] = true,
-		["models/cheeze/wires/nano_cpu.mdl"] = true,
-		["models/cheeze/wires/nano_logic.mdl"] = true,
-		["models/cheeze/wires/nano_math.mdl"] = true,
-		["models/cheeze/wires/nano_memory.mdl"] = true,
-		["models/cheeze/wires/nano_select.mdl"] = true,
-		["models/cheeze/wires/nano_timer.mdl"] = true,
-		["models/cheeze/wires/nano_trig.mdl"] = true,
-		["models/cheeze/wires/nano_value.mdl"] = true,
-		["models/cheeze/wires/ram.mdl"] = true,
-		["models/cheeze/wires/router.mdl"] = true,
-		["models/cheeze/wires/speaker.mdl"] = true,
-		["models/cheeze/wires/wireless_card.mdl"] = true,
-		["models/cyborgmatt/capacitor_large.mdl"] = true,
-		["models/cyborgmatt/capacitor_medium.mdl"] = true,
-		["models/cyborgmatt/capacitor_small.mdl"] = true,
-		["models/expression 2/cpu_controller.mdl"] = true,
-		["models/expression 2/cpu_controller_mini.mdl"] = true,
-		["models/expression 2/cpu_controller_nano.mdl"] = true,
-		["models/expression 2/cpu_expression.mdl"] = true,
-		["models/expression 2/cpu_expression_mini.mdl"] = true,
-		["models/expression 2/cpu_expression_nano.mdl"] = true,
-		["models/expression 2/cpu_interface.mdl"] = true,
-		["models/expression 2/cpu_interface_mini.mdl"] = true,
-		["models/expression 2/cpu_interface_nano.mdl"] = true,
-		["models/expression 2/cpu_microchip.mdl"] = true,
-		["models/expression 2/cpu_microchip_mini.mdl"] = true,
-		["models/expression 2/cpu_microchip_nano.mdl"] = true,
-		["models/expression 2/cpu_processor.mdl"] = true,
-		["models/expression 2/cpu_processor_mini.mdl"] = true,
-		["models/expression 2/cpu_processor_nano.mdl"] = true,
-		["models/hammy/pci_card.mdl"] = true,
-		["models/hammy/pci_slot.mdl"] = true,
-		["models/holograms/cone.mdl"] = true,
-		["models/holograms/cube.mdl"] = true,
-		["models/holograms/cylinder.mdl"] = true,
-		["models/holograms/hexagon.mdl"] = true,
-		["models/holograms/hq_cone.mdl"] = true,
-		["models/holograms/hq_cubinder.mdl"] = true,
-		["models/holograms/hq_cylinder.mdl"] = true,
-		["models/holograms/hq_dome.mdl"] = true,
-		["models/holograms/hq_hdome.mdl"] = true,
-		["models/holograms/hq_hdome_thick.mdl"] = true,
-		["models/holograms/hq_hdome_thin.mdl"] = true,
-		["models/holograms/hq_icosphere.mdl"] = true,
-		["models/holograms/hq_rcube.mdl"] = true,
-		["models/holograms/hq_rcube_thick.mdl"] = true,
-		["models/holograms/hq_rcube_thin.mdl"] = true,
-		["models/holograms/hq_rcylinder.mdl"] = true,
-		["models/holograms/hq_rcylinder_thick.mdl"] = true,
-		["models/holograms/hq_rcylinder_thin.mdl"] = true,
-		["models/holograms/hq_sphere.mdl"] = true,
-		["models/holograms/hq_stube.mdl"] = true,
-		["models/holograms/hq_stube_thick.mdl"] = true,
-		["models/holograms/hq_stube_thin.mdl"] = true,
-		["models/holograms/hq_torus.mdl"] = true,
-		["models/holograms/hq_torus_oldsize.mdl"] = true,
-		["models/holograms/hq_torus_thick.mdl"] = true,
-		["models/holograms/hq_torus_thin.mdl"] = true,
-		["models/holograms/hq_tube.mdl"] = true,
-		["models/holograms/hq_tube_thick.mdl"] = true,
-		["models/holograms/hq_tube_thin.mdl"] = true,
-		["models/holograms/icosphere.mdl"] = true,
-		["models/holograms/icosphere2.mdl"] = true,
-		["models/holograms/icosphere3.mdl"] = true,
-		["models/holograms/octagon.mdl"] = true,
-		["models/holograms/plane.mdl"] = true,
-		["models/holograms/prism.mdl"] = true,
-		["models/holograms/pyramid.mdl"] = true,
-		["models/holograms/sphere.mdl"] = true,
-		["models/holograms/sphere2.mdl"] = true,
-		["models/holograms/sphere3.mdl"] = true,
-		["models/holograms/tetra.mdl"] = true,
-		["models/holograms/torus.mdl"] = true,
-		["models/holograms/torus2.mdl"] = true,
-		["models/holograms/torus3.mdl"] = true,
-		["models/jaanus/thruster_flat.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_beamcaster.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_controlchip.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_detonator.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_gate.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_grabber_forcer.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_input.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_output.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_pixel_lrg.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_pixel_med.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_pixel_sml.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_range.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_siren.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_speed.mdl"] = true,
-		["models/jaanus/wiretool/wiretool_waypoint.mdl"] = true,
-		["models/killa-x/speakers/speaker_medium.mdl"] = true,
-		["models/killa-x/speakers/speaker_small.mdl"] = true,
-		["models/kobilica/capacatitor.mdl"] = true,
-		["models/kobilica/lowpolygate.mdl"] = true,
-		["models/kobilica/relay.mdl"] = true,
-		["models/kobilica/transistor.mdl"] = true,
-		["models/kobilica/transistorsmall.mdl"] = true,
-		["models/kobilica/value.mdl"] = true,
-		["models/kobilica/wiremonitorbig.mdl"] = true,
-		["models/kobilica/wiremonitorrt.mdl"] = true,
-		["models/kobilica/wiremonitorrtbig.mdl"] = true,
-		["models/kobilica/wiremonitorsmall.mdl"] = true,
-		["models/led.mdl"] = true,
-		["models/led2.mdl"] = true,
-		["models/segment.mdl"] = true,
-		["models/segment2.mdl"] = true,
-		["models/segment3.mdl"] = true,
-		["models/wingf0x/altisasocket.mdl"] = true,
-		["models/wingf0x/ethernetplug.mdl"] = true,
-		["models/wingf0x/ethernetsocket.mdl"] = true,
-		["models/wingf0x/hdmiplug.mdl"] = true,
-		["models/wingf0x/hdmisocket.mdl"] = true,
-		["models/wingf0x/isaplug.mdl"] = true,
-		["models/wingf0x/isasocket.mdl"] = true,
-	}
-
-	function ACF.IsWireModel(Entity)
-		return WireModels[Entity:GetModel()]
 	end
 end
