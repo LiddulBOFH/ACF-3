@@ -11,8 +11,6 @@ language.Add("Cleanup_acf_ammo", "ACF Ammo Crates")
 language.Add("Cleaned_acf_ammo", "Cleaned up all ACF Ammo Crates")
 language.Add("SBoxLimit__acf_ammo", "You've reached the ACF Ammo Crates limit!")
 
-killicon.Add("acf_ammo", "HUD/killicons/acf_ammo", ACF.KillIconColor)
-
 local function UpdateAmmoCount(Entity, Ammo)
 	if not IsValid(Entity) then return end
 	if not Entity.HasData then

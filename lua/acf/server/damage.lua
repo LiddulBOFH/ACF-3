@@ -354,6 +354,9 @@ do -- Deal Damage ---------------------------
 		return HitRes
 	end
 
+	-- DamageBonus
+	-- Try to use for determining how many entities got penned before player was hit?
+
 	local function SquishyDamage(Bullet, Trace, Volume)
 		local Entity = Trace.Entity
 		local Size   = Entity:BoundingRadius()
