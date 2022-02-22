@@ -249,11 +249,12 @@ do -- Ammo crate capacity calculation
 		return Size[Axis], Y, Z, AxisInfo.Ang
 	end
 
-	local function GetRoundsPerAxis(SizeX, SizeY, SizeZ, Length, Width, Height, Spacing)
+	local function GetRoundsPerAxis(SizeX, SizeY, SizeZ, Length, Width, Height, Spacing, Belted)
 		-- Omitting spacing for the axises with just one round
+		local AlteredSpacing = Belted and 0 or Spacing
 		if math.floor(SizeX / Length) > 1 then Length = Length + Spacing end
-		if math.floor(SizeY / Width) > 1 then Width = Width + Spacing end
-		if math.floor(SizeZ / Height) > 1 then Height = Height + Spacing end
+		if math.floor(SizeY / Width) > 1 then Width = Width + AlteredSpacing end
+		if math.floor(SizeZ / Height) > 1 then Height = Height + AlteredSpacing end
 
 		local RoundsX = math.floor(SizeX / Length)
 		local RoundsY = math.floor(SizeY / Width)
@@ -281,7 +282,7 @@ do -- Ammo crate capacity calculation
 				end
 			end
 
-			local RoundsX, RoundsY, RoundsZ = GetRoundsPerAxis(X, Y, Z, Length, Width, Height, Spacing)
+			local RoundsX, RoundsY, RoundsZ = GetRoundsPerAxis(X, Y, Z, Length, Width, Height, Spacing, ExtraData.Belted)
 			local Count = RoundsX * RoundsY * RoundsZ * Multiplier
 
 			if Count > BestCount then
@@ -305,6 +306,7 @@ do -- Ammo crate capacity calculation
 		local Width     = Caliber * ACF.AmmoCaseScale * 0.1 -- mm to cm
 		local Length    = BulletData.PropLength + BulletData.ProjLength + BulletData.Tracer
 		local MagSize   = math.floor(ACF.GetWeaponValue("MagSize", Caliber, WeaponClass, Weapon) or 1)
+		local BeltFed 	= ACF.GetWeaponValue("BeltFed", Caliber, WeaponClass, Weapon) or false
 		local Spacing   = math.max(0, ToolData.AmmoPadding or ACF.AmmoPadding) * 0.1 + 0.125
 		local IsBoxed   = WeaponClass.IsBoxed
 		local Rounds    = 0
@@ -338,9 +340,13 @@ do -- Ammo crate capacity calculation
 
 		ExtraData.Spacing = Spacing
 
-		-- This block alters the stored round size, making it more like a container of the rounds
-		-- This cuts a little bit of ammo storage out
-		if MagSize > 1 then
+		-- This block alters how ammo is stored
+		-- If the weapon is supposed to be beltfed, then it removes the lateral spacing between rounds (because its on a belt)
+		-- Otherwise, it converts the rounds into "boxes" of rounds and spaces between those, and each box represents one magazine
+		if BeltFed then
+			MagSize = 1
+			ExtraData.Belted = true
+		elseif MagSize > 1 then
 			if IsBoxed and not ExtraData.IsRacked then
 				-- Makes certain automatic ammo stored by boxes
 				Width = Width * math.sqrt(MagSize)
@@ -386,7 +392,7 @@ do -- Ammo crate capacity calculation
 				ExtraData.LocalAng = ExtraData.LocalAng + Angle(0, 0, 90)
 			end
 
-			local RoundsX, RoundsY, RoundsZ = GetRoundsPerAxis(SizeX, SizeY, SizeZ, Length, Width, Height, Spacing)
+			local RoundsX, RoundsY, RoundsZ = GetRoundsPerAxis(SizeX, SizeY, SizeZ, Length, Width, Height, Spacing, ExtraData.Belted)
 
 			ExtraData.FitPerAxis = Vector(RoundsX, RoundsY, RoundsZ)
 

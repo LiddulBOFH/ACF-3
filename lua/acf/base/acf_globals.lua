@@ -65,6 +65,8 @@ do -- ACF global vars
 		npc_strider = true,
 		npc_dog = true
 	}
+	ACF.AmbientTemperature	= 294.8 -- Just a good ambient temperature, in K (294.8 will be used in calculations regardless for accuracy checks)
+	--| This should also be able to be modified on the fly, say a mod that adds "ambient temperatures" to maps
 
 	-- Ammo
 	ACF.AmmoArmor          = 5 -- How many millimeters of armor ammo crates have

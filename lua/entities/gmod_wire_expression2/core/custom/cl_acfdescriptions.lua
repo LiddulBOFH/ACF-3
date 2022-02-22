@@ -3,6 +3,7 @@ local E2Desc = E2Helper.Descriptions
 -- General Functions
 E2Desc["acfDragDiv()"] = "Returns the current ACF drag divisor."
 E2Desc["acfInfoRestricted()"] = "Returns 1 if functions are not returning sensitive information of entities you don't own."
+E2Desc["acfAmbientTemperature()"] = "Returns the ambient temperature, in Celsius."
 E2Desc["acfName(e:)"] = "Returns the full name of an ACF entity."
 E2Desc["acfNameShort(e:)"] = "Returns the short name of an ACF entity."
 E2Desc["acfType(e:)"] = "Returns the type of ACF entity."
@@ -108,6 +109,7 @@ E2Desc["acfMissileLength(e:)"] = "Returns the length of the missile in an ACF en
 E2Desc["acfFLSpikes(e:)"] = "Returns the number of projectiles in a flechette round."
 E2Desc["acfFLSpikeRadius(e:)"] = "Returns the radius (in mm) of the spikes in a flechette round."
 E2Desc["acfFLSpikeMass(e:)"] = "Returns the mass of a single spike in a FL round in a crate or gun."
+E2Desc["acfTemperature(e:)"] = "Returns the temperature of the entity, if applicable, in Celsius."
 
 E2Desc["acfPenetration(e:)"] = "Returns the penetration of a round in an ACF entity."
 E2Desc["acfBlastRadius(e:)"] = "Returns the blast radius of a round in an ACF entity."

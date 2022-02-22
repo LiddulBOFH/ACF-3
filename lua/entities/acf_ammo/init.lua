@@ -176,7 +176,7 @@ do -- Spawning and Updating --------------------
 				--Entity.IsTwoPiece = ExtraData.IsTwoPiece -- Ammunition is broken down to two pieces
 
 				ExtraData.MagSize = ExtraData.IsBoxed and MagSize or 0
-				ExtraData.IsRound = not (ExtraData.IsBoxed or ExtraData.IsTwoPiece or ExtraData.IsRacked)
+				ExtraData.IsRound = not (ExtraData.IsBoxed or ExtraData.IsTwoPiece or ExtraData.IsRacked or ExtraData.Belted)
 				ExtraData.Capacity = Entity.Capacity
 				ExtraData.Enabled = true
 			else

@@ -8,6 +8,7 @@ ACF.RegisterWeaponClass("SB", {
 	IsScalable  = true,
 	Spread      = 0.08,
 	Mass		= 2031,
+	HeatWarpMult = 0.5,
 	Round = {
 		MaxLength  = 80,
 		PropLength = 58,

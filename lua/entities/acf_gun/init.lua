@@ -99,7 +99,8 @@ do -- Spawn and Update functions --------------------------------
 			"Rate of Fire (How fast the weapon can fire)",
 			"Reload Time (How long a reload will take)",
 			"Projectile Mass (The mass of the projectile)",
-			"Muzzle Velocity (The speed of the projectile, leaving the barrel)"
+			"Muzzle Velocity (The speed of the projectile, leaving the barrel)",
+			"Temperature (The temperature of the weapon, in C)"
 		}
 
 		if Class.SetupOutputs then
@@ -149,6 +150,13 @@ do -- Spawn and Update functions --------------------------------
 		local Cyclic  = ACF.GetWeaponValue("Cyclic", Caliber, Class, Weapon)
 		local MagSize = ACF.GetWeaponValue("MagSize", Caliber, Class, Weapon) or 1
 
+		if Class.BeltFed then
+			MagSize = 1
+			Entity.BeltFed = true
+		else
+			Entity.BeltFed = nil
+		end
+
 		Entity.ACF.Model = Model
 
 		Entity:SetModel(Model)
@@ -178,6 +186,39 @@ do -- Spawn and Update functions --------------------------------
 		Entity.NormalMuzzle = Entity:WorldToLocal(Entity:GetAttachment(Entity:LookupAttachment("muzzle")).Pos)
 		Entity.Muzzle       = Entity.NormalMuzzle
 
+		-- https://matmatch.com/materials/minfc934-astm-a322-grade-4150 < neat website
+		-- Taking an average of samples of 4150 steel, since I can actually find data about it
+		-- Thermal conductivity: 40 J(W) / (m s K)
+		-- Specific heat: 475 J/(kg K)
+		-- Density: 7900kg/m3
+		-- Melting point: 1500C
+		-- ~950C for starting failure point?
+
+		local Thermal = {}
+		if Entity.Thermal then
+			Thermal.Temp	= Entity.Thermal.TempInner
+		else
+			Thermal.Temp	= ACF.AmbientTemperature
+		end
+
+		-- Approximate barrel length
+		local BarLen = (Entity.Size.x * 0.03937 * 0.45)
+
+		-- This multiplies the rate of heat transfer to the air
+		Thermal.TransferMult = Entity.ClassData.TransferMult or 1
+
+		-- This multiplies the "warp" spread caused by excessively hot barrels
+		Thermal.HeatWarpMult = Entity.ClassData.HeatWarpMult or 1
+
+		local BarrelVolume = 3.1415 * (Entity.Caliber / 1000) * BarLen
+		local OuterBarrelVolume = 3.1415 * ((Entity.Caliber / 1000) * 1.15) * BarLen
+
+		Thermal.OuterArea	= 2 * 3.1415 * ((Entity.Caliber / 1000) * 1.15) * BarLen
+		Thermal.BarrelMass	= (OuterBarrelVolume - BarrelVolume) * 7900
+		Thermal.BarLen		= BarLen
+
+		Entity.Thermal = Thermal
+
 		CreateInputs(Entity, Data, Class)
 		CreateOutputs(Entity, Data, Class)
 
@@ -197,6 +238,8 @@ do -- Spawn and Update functions --------------------------------
 			WireLib.TriggerOutput(Entity, "Reload Time", Entity.Cyclic)
 			WireLib.TriggerOutput(Entity, "Rate of Fire", 60 / Entity.Cyclic)
 		end
+
+		Entity.CrateCheck = ACF.CurTime - 0.1
 
 		ACF.Activate(Entity, true)
 
@@ -497,7 +540,10 @@ do -- Metamethods --------------------------------
 			local SpreadScale = ACF.SpreadScale
 			local IaccMult    = math.Clamp(((1 - SpreadScale) / 0.5) * ((self.ACF.Health / self.ACF.MaxHealth) - 1) + 1, 1, SpreadScale)
 
-			return self.Spread * ACF.GunInaccuracyScale * IaccMult
+			-- A little arbitrary, yes
+			local HeatSpread = math.Clamp((self.Thermal.Temp / (1223.15 / 3)) ^ 2,1,50)
+
+			return self.Spread * ACF.GunInaccuracyScale * IaccMult * HeatSpread
 		end
 
 		function ENT:Shoot()
@@ -506,6 +552,19 @@ do -- Metamethods --------------------------------
 			local Spread = randUnitSquare:GetNormalized() * Cone * (math.random() ^ (1 / ACF.GunInaccuracyBias))
 			local Dir = (self:GetForward() + Spread):GetNormalized()
 			local Velocity = ACF_GetAncestor(self):GetVelocity()
+
+			local BulletEnergy = (self.BulletData.PropMass * ACF.PropImpetus * ACF.PDensity * 1000)
+
+			if self.Thermal.Temp >= 1223.15 then
+				local MalleableRange = (self.Thermal.Temp - 1223.15) / 550
+				local Damage = (BulletEnergy / 10000) * MalleableRange * 0.05
+
+				self.ACF.Health = math.max(self.ACF.Health - Damage,0)
+				if self.ACF.Health <= 0 then ACF.APKill(self,self:GetForward(),5) return end
+			end
+
+			local VelMod = math.Clamp(1 - ((self.Thermal.Temp - 695) / (1223.15 * 2)),0.1,1)
+			self.Thermal.Temp = self.Thermal.Temp + ((BulletEnergy * 0.66 * self.Thermal.BarLen) / (475 * self.Thermal.BarrelMass))
 
 			if self.BulletData.CanFuze and self.SetFuze then
 				local Variance = math.Rand(-0.015, 0.015) * math.max(0, 203 - self.Caliber) * 0.01
@@ -520,7 +579,7 @@ do -- Metamethods --------------------------------
 			self.BulletData.Owner  = self.CurrentUser
 			self.BulletData.Gun	   = self -- because other guns share this table
 			self.BulletData.Pos    = self:BarrelCheck(Velocity * engine.TickInterval())
-			self.BulletData.Flight = Dir * self.BulletData.MuzzleVel * 39.37 + Velocity
+			self.BulletData.Flight = Dir * (self.BulletData.MuzzleVel * VelMod) * 39.37 + Velocity
 			self.BulletData.Fuze   = self.Fuze -- Must be set when firing as the table is shared
 			self.BulletData.Filter = self.BarrelFilter
 
@@ -536,7 +595,7 @@ do -- Metamethods --------------------------------
 			end
 
 			if self.MagSize then -- Mag-fed/Automatically loaded
-				self.CurrentShot = self.CurrentShot - 1
+				if not self.BeltFed then self.CurrentShot = self.CurrentShot - 1 end
 
 				if self.CurrentShot > 0 then -- Not empty
 					self:Chamber(self.Cyclic)
@@ -813,7 +872,7 @@ do -- Metamethods --------------------------------
 		end
 
 		function ENT:Think()
-			if next(self.Crates) then
+			if next(self.Crates) and (ACF.CurTime >= self.CrateCheck) then
 				local Pos = self:GetPos()
 
 				for Crate in pairs(self.Crates) do
@@ -826,9 +885,24 @@ do -- Metamethods --------------------------------
 						self:Unlink(Crate)
 					end
 				end
+
+				self.CrateCheck = ACF.CurTime + 1
 			end
 
-			self:NextThink(ACF.CurTime + 1)
+			local TempDiff = (self.Thermal.Temp - ACF.AmbientTemperature)
+
+			local HeatFlux = 40 * ((self.Caliber / 1000) * 1.1)
+
+			local HeatFlow = HeatFlux * self.Thermal.OuterArea * TempDiff
+
+			-- Since I'm not simulating this correctly (nor while I make it 100% accurate) there is going to be a lot of
+			-- fudging so this isn't super punishing while at the same time something that makes itself known if the weapon is abused
+			local FinalFlow = ((HeatFlow / (475 * self.Thermal.BarrelMass)) * self.Thermal.TransferMult) * 50 -- magic make game fun number, literally just speeds transfer up so guns are usable after a little wait
+
+			self.Thermal.Temp = self.Thermal.Temp - FinalFlow
+			WireLib.TriggerOutput(self, "Temperature", math.Round(self.Thermal.Temp - 273.15,3))
+
+			self:NextThink(ACF.CurTime + 0.2)
 
 			return true
 		end

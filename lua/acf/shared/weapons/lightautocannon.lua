@@ -7,6 +7,7 @@ ACF.RegisterWeaponClass("LAC", {
 	IsScalable  = true,
 	Mass        = 301,
 	Spread      = 0.48,
+	BeltFed		= true,
 	Round = {
 		MaxLength  = 32,
 		PropLength = 26,

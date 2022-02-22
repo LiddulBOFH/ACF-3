@@ -87,6 +87,11 @@ e2function number acfInfoRestricted()
 	return ACF.RestrictInfo and 1 or 0
 end
 
+-- Returns the ambient temperature of the map (able to be set)
+e2function number acfTemperature()
+	return ACF.AmbientTemperature
+end
+
 __e2setcost(5)
 
 -- Returns the full name of an ACF entity
@@ -1078,6 +1083,16 @@ e2function number entity:acfFLSpikeRadius()
 	local Radius     = BulletData and BulletData.FlechetteRadius
 
 	return Radius and Round(Radius * 10, 2) or 0
+end
+
+-- Returns the temperature of the entity, if applicable, in C
+e2function number entity:acfTemperature()
+	if not IsACFEntity(this) then return 0 end
+	if RestrictInfo(self, this) then return 0 end
+
+	local Temp = this.Thermal and (this.Thermal.Temp - 273.15)
+
+	return Temp or 0
 end
 
 __e2setcost(10)

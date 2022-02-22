@@ -8,6 +8,8 @@ ACF.RegisterWeaponClass("RAC", {
 	Spread      = 0.48,
 	Mass        = 212,
 	Cyclic      = 2000,
+	BeltFed		= true,
+	TransferMult = 6,
 	Round = {
 		MaxLength  = 16,
 		PropLength = 13,
