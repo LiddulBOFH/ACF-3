@@ -196,7 +196,7 @@ do -- Spawn and Update functions --------------------------------
 
 		local Thermal = {}
 		if Entity.Thermal then
-			Thermal.Temp	= Entity.Thermal.TempInner
+			Thermal.Temp	= Entity.Thermal.Temp
 		else
 			Thermal.Temp	= ACF.AmbientTemperature
 		end
@@ -891,7 +891,7 @@ do -- Metamethods --------------------------------
 
 			local TempDiff = (self.Thermal.Temp - ACF.AmbientTemperature)
 
-			local HeatFlux = 40 * ((self.Caliber / 1000) * 1.1)
+			local HeatFlux = 40 * ((self.Caliber / 1000) * 1.15)
 
 			local HeatFlow = HeatFlux * self.Thermal.OuterArea * TempDiff
 
