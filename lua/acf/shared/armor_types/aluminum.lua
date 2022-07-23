@@ -7,5 +7,6 @@ function Armor:OnLoaded()
 	self.Name		 = "6061 Aluminum"
 	self.Density     = 2.7 -- g/cm3
 	self.Tensile     = 207
+	self.Yield		 = 110
 	self.Description = "Less dense than steel at the expense of durability."
 end

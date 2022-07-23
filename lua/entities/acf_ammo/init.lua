@@ -130,6 +130,8 @@ do -- Spawning and Updating --------------------
 			Entity.BulletData = Ammo:ServerConvert(Data)
 			Entity.BulletData.Crate = Entity:EntIndex()
 
+			PrintTable(Entity.BulletData)
+
 			if Ammo.OnFirst then
 				Ammo:OnFirst(Entity)
 			end
@@ -444,7 +446,7 @@ do -- ACF Activation and Damage -----------------
 		local Volume = PhysObj:GetVolume()
 
 		local Armour = ACF.AmmoArmor
-		local Health = Volume / ACF.Threshold --Setting the threshold of the prop Area gone
+		local Health = ACF.Armor.CalculateHealth(self,7.84,self.ACF.Area / 6.45)
 		local Percent = 1
 
 		if Recalc and self.ACF.Health and self.ACF.MaxHealth then
@@ -516,7 +518,7 @@ do -- ACF Activation and Damage -----------------
 		local FragMass      = self.BulletData.ProjMass or ExplosiveMass * 0.5
 
 		ACF.KillChildProps(self, Pos, ExplosiveMass)
-		ACF.HE(Pos, ExplosiveMass, FragMass, self.Inflictor, {self}, self)
+		ACF.HE({Origin = Pos,ExplosiveMass = ExplosiveMass,FragMass = FragMass,Inflictor = self.Inflictor},{self},self)
 
 		local Effect = EffectData()
 			Effect:SetOrigin(Pos)

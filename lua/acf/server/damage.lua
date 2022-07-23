@@ -1,6 +1,7 @@
 -- Local Vars -----------------------------------
 local ACF     = ACF
 local HookRun = hook.Run
+local pi = math.pi
 
 do -- KE Shove
 	function ACF.KEShove(Target, Pos, Vec, KE)
@@ -26,21 +27,6 @@ end
 
 do -- Explosions ----------------------------
 	local TraceData = { start = true, endpos = true, mask = MASK_SOLID, filter = false }
-	local Bullet = {
-		IsFrag   = true, -- We need to let people know this isn't a regular bullet somehow
-		Owner    = true,
-		Gun      = true,
-		Caliber  = true,
-		Diameter = true,
-		ProjArea = true,
-		ProjMass = true,
-		Flight   = true,
-		Speed    = true,
-	}
-
-	function Bullet:GetPenetration()
-		return ACF.Penetration(self.Speed, self.ProjMass, self.Diameter * 10)
-	end
 
 	local function GetRandomPos(Entity, IsChar)
 		if IsChar then
@@ -67,6 +53,200 @@ do -- Explosions ----------------------------
 		end
 	end
 
+	local FragData = {
+		IsFrag = true,
+		Owner = true,
+		Gun = true,
+		NoEffect = true, -- Too much hassle trying to do something special for fragments, so we'll just not
+
+		ProjArea = true,
+		ProjMass = true,
+		Caliber = true,
+		Diameter = true,
+		Flight = true,
+		Speed = true,
+		ShovePower = 0.2,
+		Type = "AP",
+		LimitVel = 800,
+		Ricochet = 60,
+		MaxLife = true
+	}
+
+	function FragData:GetPenetration()
+		return ACF.Penetration(self.Speed, self.ProjMass, self.Diameter * 10)
+	end
+
+	local AmmoTypes = ACF.Classes.AmmoTypes
+	local function CreateFrag(FragVel,ParentVel,InputFragData)
+		local Dir = VectorRand(-1,1):GetNormalized()
+		local Vel = (Dir * FragVel) + ParentVel * 2
+		InputFragData.Flight = Vel:GetNormalized() * math.Clamp(Vel:Length(),0,300000)
+		-- Fuzing an AP shell makes it simply disappear, as long as the OnFlightEnd remains as just a means to delete the shell
+		-- Doesn't need to last too long, 1s ought to be enough?
+		InputFragData.Fuze = math.min((InputFragData.Flight:Length() / 2048) * math.max(InputFragData.ProjMass,1),0.2)
+
+		AmmoTypes["AP"]:Create(FragSource,InputFragData)
+	end
+
+	--[[
+	{{OLD}} ACF.HE(Origin, FillerMass, FragMass, Inflictor, Filter, Gun)
+	{{NEW}} ACF.HE(ExplosiveData, Filter, Gun, Trace, Bullet)
+	ExplosiveData = {
+		Origin 		= Vector(), -- Position of the explosion
+		ExplosiveMass 	= 0, -- The explosive content
+		ProjMass 	= 0, -- The projectile's mass, not counting the filler content
+		FragMass	= 0, -- Optional, but overrides calculation for the same thing (for manual input of FragMass)
+		Inflictor	= true, -- Whoever smelled it dealt it
+	}
+	]]
+
+	-- TODO: When calculating blast, do a moving center, and check during each interval if this center ever leaves the blast radius
+	-- This can be combined with blast energy to be a cheap way to simulate blast compression (exploded inside a tank)
+	-- Thus, if energy drops below a threshold, the explosion should stop getting calculated
+
+	-- TODO: Applying damage: Use the area of the sphere for dispersal, and then a slice of the volume of the entity in question?
+
+	function ACF.HE(ExplosiveData, Filter, Gun, Trace, Bullet)
+		if HookRun("ACF_BlastDamage", {Origin = ExplosiveData.Origin,Owner = ExplosiveData.Inflictor}) == false then return end
+		Filter = Filter or {}
+		local ShortFilter = {}
+		if not Trace then table.insert(Filter,Gun) end -- Not always a gun that causes HE (ammo explosions, fuel tanks), so if this is the case we should filter it out
+		-- Afterthought: After looking at CreateBullet, Filter is automatically written with Gun, but I'll leave this just incase
+
+		for _,v in pairs(Filter) do ShortFilter[v] = true end
+
+		--if true then return end
+
+		ExplosiveData.Gun = Gun
+		ExplosiveData.Owner = ExplosiveData.Inflictor
+		local BlastData = ACF.GetBlastInfo(ExplosiveData)
+		local FragEnergy = BlastData.Energy * 0.67
+
+		local Amp 		 = math.min(BlastData.Energy / 2000, 50)
+
+		TraceData.start = BlastData.Origin
+		TraceData.filter = Filter
+
+		util.ScreenShake(BlastData.Origin, Amp, Amp, Amp / 15, BlastData.Radius * 10)
+
+		debugoverlay.Sphere(BlastData.Origin,BlastData.Radius,15,Color(255,0,0,5),false)
+		debugoverlay.Cross(BlastData.Origin,BlastData.Radius, 15, Color( 255, 255, 255 ), true)
+
+		local PreEnts = ents.FindInSphere(ExplosiveData.Origin,BlastData.Radius)
+
+		local Ents = {}
+		for _,ent in ipairs(PreEnts) do
+			if not ACF.Check(ent) then table.insert(Filter,ent) continue end
+			if (ent:IsPlayer() or ent:IsNPC()) and ent:Health() <= 0 then table.insert(Filter,ent) continue end -- deadite filter, just in case
+			local diff = (ExplosiveData.Origin - ent:GetPos())
+			table.insert(Ents,{ent,diff:LengthSqr(),diff:GetNormalized():Angle()})
+		end -- 1 = Entity, 2 = DistSqr from Origin, 3 = Angle to entity from Origin
+		table.sort(Ents,function(a,b) return a[2] < b[2] end)
+
+		local WaveCenter = BlastData.Origin
+		if Trace and Trace.HitNormal:LengthSqr() ~= 0 then
+			WaveCenter = WaveCenter + (Trace.HitNormal * (BlastData.Energy ^ (1 / 4)))
+		end
+
+		BlastData.Origin = WaveCenter
+
+		debugoverlay.Cross(WaveCenter,60,15,Color(255,0,0),true)
+
+		-- Explosive wave itself
+		for _,data in ipairs(Ents) do
+			local ent = data[1]
+			if BlastData.Energy <= 0 then print("Ran out of energy :(") break end
+			local ePos = ent:LocalToWorld(ent.OBBCenterOrg or ent:OBBCenter())
+
+			local Pos = GetRandomPos(ent,ent:IsPlayer() or ent:IsNPC() or ent:IsNextBot())
+			TraceData.endpos = Pos
+			local t = ACF.TraceF(TraceData)
+			if IsValid(t.Entity) and t.Entity == ent then
+				local CrossSectionalArea = ACF.GetCrossSectionalArea(BlastData.Origin,ent)
+
+				local nearestPos = ent:NearestPoint(BlastData.Origin)
+				local Mix = LerpVector(0.75,ePos,nearestPos)
+
+				local E = ACF.BlastDamage(BlastData,ent,Mix,CrossSectionalArea)
+
+				if IsValid(ent) and (ent.ACF.Health > 0) then
+					BlastData.Energy = BlastData.Energy - (E * 0.5)
+					WaveCenter = WaveCenter + ((WaveCenter - Mix):GetNormalized() * E * 0.01)
+					if ent.ACF.Type == "Prop" then
+						ACF.KEShove(ent,ExplosiveData.Origin,(ExplosiveData.Origin - (Mix + VectorRand(-CrossSectionalArea / 10,CrossSectionalArea / 10))):GetNormalized(),E * 10)
+					end
+				else -- it died
+					BlastData.Energy = BlastData.Energy - (E * 0.25)
+					WaveCenter = WaveCenter - ((WaveCenter - Mix):GetNormalized() * E * 0.1)
+				end
+			else continue end
+
+			--debugoverlay.Text(ent:GetPos(),"I: " .. ind,15,false)
+		end
+
+		debugoverlay.Cross(WaveCenter,60,15,Color(0,0,255),true)
+
+		-- Fragmentation
+
+		local ParentVel = Vector()
+		if Bullet then
+			ParentVel = Bullet.Flight * 0.25
+		elseif Gun then
+			local Ancestor = ACF_GetAncestor(Gun):GetPhysicsObject()
+			if IsValid(Ancestor) then
+				ParentVel = Ancestor:GetVelocity() * 0.25
+			end
+		end
+
+		ParentVel = ParentVel + ((WaveCenter - ExplosiveData.Origin) * 5)
+
+		--local ParentVel = (Bullet and (Bullet.Flight * 0.2)) or (Gun and IsValid(ACF_GetAncestor(Gun):GetPhysicsObject()) and ACF_GetAncestor(Gun):GetPhysicsObject():GetVelocity() * 0.2) or Vector()
+		if Trace and Trace.HitNormal:LengthSqr() ~= 0 then -- SPROING, not really but
+			local Vel = ParentVel:Length() * 0.1
+			local Dot = -ParentVel:GetNormalized():Dot(Trace.HitNormal)
+			ParentVel = ((ParentVel:GetNormalized() * (1 - Dot) * 3) + (Trace.HitNormal * 1.5)):GetNormalized() * (Vel * math.min(math.max((1 - Dot) * 2,0.25),1))
+		end
+
+		if (not util.IsInWorld(ExplosiveData.Origin)) or not (ExplosiveData.ProjMass or ExplosiveData.FragMass) then print("Can't spawn fragments!") return end
+
+		-- The divisor is to "combine" fragments so we can spawn more sane amounts
+		local FragMass = ExplosiveData.FragMass or (ExplosiveData.ProjMass - ExplosiveData.ExplosiveMass)
+		local Fragments  = math.Clamp(math.floor(((ExplosiveData.ExplosiveMass / FragMass) * ACF.HEFrag) / 8), 2, 255)
+		local FragmentPotential = math.max(math.floor((ExplosiveData.ExplosiveMass / FragMass) * ACF.HEFrag), 2)
+		local FragmentBoost = (FragmentPotential / Fragments) * 0.5
+		print(Fragments .. " frags, " .. FragmentPotential .. " potentially, " .. math.Round(FragmentBoost * 100,1) .. "% boost")
+
+		-- TODO: Turn into a broken sphere of fragments, sent only to props not destroyed but are hittable
+
+		FragData.Owner = ExplosiveData.Inflictor
+		FragData.Gun = Gun
+		FragData.Filter = Filter
+		FragData.Pos = ExplosiveData.Origin - (Bullet and (Bullet.Flight and Bullet.Flight:GetNormalized()) or Vector())
+
+		local BaseFragWeight = FragMass / FragmentPotential
+		for _ = 1,Fragments do
+			local Caliber = math.Rand(0.5, 1.5) -- Random fragment caliber
+			local FragWeight = BaseFragWeight * (Caliber / 1)
+			local ProjArea = pi * (Caliber * 0.05) ^ 2
+			local FragVel = (((FragEnergy * 5000 / FragWeight) ^ 0.5) / 10)
+
+			FragData.ProjMass = FragWeight * FragmentBoost
+			FragData.ProjArea = ProjArea * math.max(1,FragmentBoost / 2)
+			FragData.Caliber = Caliber * 0.05
+			FragData.Diameter = Caliber * 0.05
+			FragData.DragCoef = ProjArea * 0.0001 / FragWeight
+
+			CreateFrag(FragVel,ParentVel,FragData) -- TODO: Works fine, uncomment when done with blast damage
+		end
+	end
+
+	local function explode(ply)
+		local hitpos = ply:GetEyeTrace().HitPos
+		ACF.HE({Origin = hitpos,ExplosiveMass = 11,ProjMass = 17,Inflictor = ply},{},ply,ply:GetEyeTrace())
+	end
+	concommand.Add("acf_explode",explode) -- TODO: REMOVE!!!!
+
+--[[
 	-- TODO: Separate this function into multiple chunks, it's absolutely unreadable.
 	function ACF.HE(Origin, FillerMass, FragMass, Inflictor, Filter, Gun)
 		debugoverlay.Cross(Origin, 15, 15, Color( 255, 255, 255 ), true)
@@ -221,7 +401,7 @@ do -- Explosions ----------------------------
 
 			Power = math.max(Power - PowerSpent, 0)
 		end
-	end
+	end]]
 
 	ACF_HE = ACF.HE
 end -----------------------------------------
@@ -333,25 +513,33 @@ do -- Deal Damage ---------------------------
 
 	local function CalcDamage(Bullet, Trace, Volume)
 		local Angle   = ACF.GetHitAngle(Trace.HitNormal, Bullet.Flight)
-		local Area    = Bullet.ProjArea
 		local HitRes  = {}
 
-		local Caliber        = Bullet.Diameter * 10
-		local BaseArmor      = Trace.Entity.ACF.Armour
-		local SlopeFactor    = BaseArmor / Caliber
-		local EffectiveArmor = BaseArmor / math.abs(math.cos(math.rad(Angle)) ^ SlopeFactor)
-		local MaxPenetration = Bullet:GetPenetration() --RHA Penetration
-
-		if MaxPenetration > EffectiveArmor then
-			HitRes.Damage   = isnumber(Volume) and Volume or Area -- Inflicted Damage
-			HitRes.Overkill = MaxPenetration - EffectiveArmor -- Remaining penetration
-			HitRes.Loss     = EffectiveArmor / MaxPenetration -- Energy loss in percents
-		else
-			-- Projectile did not penetrate the armor
-			HitRes.Damage   = isnumber(Volume) and Volume or (MaxPenetration / EffectiveArmor) ^ 2 * Area
-			HitRes.Overkill = 0
-			HitRes.Loss     = 1
+		if Bullet.IsTorch then
+			return {Damage = math.min(Bullet.TorchDamage or ACF.TorchDamage,Trace.Entity.ACF.MaxHealth * 0.01),Loss = 0,Overkill = 0}
 		end
+
+		local Caliber			= Bullet.Diameter * 10
+		local BaseArmor			= Trace.Entity.ACF.Armour
+		local SlopeFactor		= BaseArmor / Caliber
+		local EffectiveArmor	= BaseArmor / math.abs(math.cos(math.rad(Angle)) ^ SlopeFactor)
+		local BulletPen			= Bullet:GetPenetration() --RHA Penetration
+		local MaxPen			= math.min(BulletPen,EffectiveArmor)
+
+		local Damage			= isnumber(Volume) and Volume or (MaxPen * ((Bullet.Diameter * 0.5) ^ 2) * pi)
+		local Loss				= math.Clamp(MaxPen / BulletPen,0,1)
+
+		if Loss == 1 and not Volume then
+			local Rico,_ = ACF_CalcRicochet(Bullet, Trace)
+			local Ang = 90 * Rico
+			if Ang > (Bullet.Ricochet or 60) then
+				Damage = Damage * math.max(1 - Rico,0.25)
+			end
+		end
+
+		HitRes.Damage	= Damage
+		HitRes.Loss		= Loss
+		HitRes.Overkill	= math.max(BulletPen - MaxPen,0)
 
 		return HitRes
 	end
@@ -361,7 +549,7 @@ do -- Deal Damage ---------------------------
 		local Bone   = Trace.HitGroup
 		local Armor  = Entity.ACF.Armour
 		local Size   = Entity:BoundingRadius()
-		local Mass   = Entity:GetPhysicsObject():GetMass()
+		local Mass   = Entity.ACF.Mass or Entity:GetPhysicsObject():GetMass()
 		local HitRes = {}
 		local Damage = 0
 
@@ -477,7 +665,7 @@ do -- Deal Damage ---------------------------
 		local Entity = Trace.Entity
 		local Type   = ACF.Check(Entity)
 
-		if HookRun("ACF_BulletDamage", Bullet, Trace) == false or Type == false then
+		if HookRun("ACF_BulletDamage", Bullet, Trace) == false or Type == false or Bullet.Flight:Length() == math.huge then
 			return { -- No damage
 				Damage = 0,
 				Overkill = 0,
@@ -498,6 +686,114 @@ do -- Deal Damage ---------------------------
 	end
 
 	ACF_Damage = ACF.Damage
+
+	-- This will return an area of the cross section of the center of the hull of the supplied entity as seen from the supplied point
+	local function GetCrossSectionalArea(point,ent)
+		local ePos = ent:LocalToWorld(ent.OBBCenterOrg or ent:OBBCenter())
+		local angToEnt = (ePos - point):GetNormalized():Angle()
+		local locSize = ent:OBBMaxs() - ent:OBBMins()
+		local locAng = ent:WorldToLocalAngles(angToEnt) -- we're gonna do the funny
+
+		debugoverlay.BoxAngles(ePos,-locSize / 2,locSize / 2,ent:GetAngles(),15,Color(255,127,0,1),false)
+		--debugoverlay.BoxAngles(ePos,Vector(0,-x / 2,-y / 2),Vector(0,x / 2,y / 2),ang,15,Color(255,0,0,1),false)
+
+		return (locAng:Right() * locSize):Length() * (locAng:Up() * locSize):Length()
+	end
+	ACF.GetCrossSectionalArea = GetCrossSectionalArea
+
+	--[[
+		BlastData = {
+			Origin = Vector(), -- Center of explosion
+			Radius = 0, -- Largest distance from the center possible
+			Energy = 0, -- Energy at the very center (peak energy)
+			MaxArea = 0, The surface area of the radius of the blast sphere
+		}
+
+		Entity being calculated against
+
+		The cross section of the hull of the entity (use the handy GetCrossSectionalArea function!)
+	]]
+
+	-- This is constant data to be stored locally throughout an instance of BlastDamage being called
+	function ACF.GetBlastInfo(ExplosiveData)
+		local BlastData = {}
+		BlastData.Origin = ExplosiveData.Origin
+		local Energy = ExplosiveData.ExplosiveMass * ACF.HEPower
+		BlastData.Energy = Energy --Power in KiloJoules of the filler mass of TNT
+
+		local Radius = (Energy ^ (1 / 3)) * 15
+		BlastData.Radius = Radius
+		BlastData.MaxArea = 4 * pi * (Radius ^ 2) -- Total area of the blast sphere
+
+		BlastData.Owner = ExplosiveData.Owner -- The person/object responsible for this explosion
+		BlastData.Gun = ExplosiveData.Gun -- The weapon/object that the made the explosion possible
+
+		return BlastData
+	end
+
+	function ACF.BlastDamage(BlastData,Entity,EntPos,CrossSectionalArea)
+		local Type = ACF.Check(Entity)
+		if HookRun("ACF_BlastDamage", BlastData,Entity) == false or Type == false then
+			return {
+				Damage = 0,
+				Overkill = 0,
+				Loss = 0,
+				Kill = false
+			}
+		end
+
+		local dist = math.max(math.min((BlastData.Origin - EntPos):Length(),BlastData.Radius),0.1)
+
+		-- Surface area of the cross section of the sphere at the object position
+		local WaveTotalArea = pi * (BlastData.Radius ^ 2) * (dist / BlastData.Radius)
+
+		--print("ENERGY",BlastData.Energy,EnergyFrac)
+
+		-- Find the ratio between the face from the blast sphere to the object's face
+		local AreaRatio = math.min(1,WaveTotalArea / CrossSectionalArea)
+
+		--print("AREA RATIO",AreaRatio,CrossSectionalArea,WaveTotalArea)
+		--print("Final Energy >>>",EnergyFrac * AreaRatio)
+
+		local dr = dist / BlastData.Radius
+		-- A horribly butchered mix of functions to give me something feasible
+		local E = BlastData.Energy * math.exp(-((dist * 12.5) / BlastData.Radius)) * (1 - dr)
+
+		local Damage = E * ((WaveTotalArea / BlastData.MaxArea) / CrossSectionalArea) * (WaveTotalArea * 25 * AreaRatio)
+
+		if Type == "Squishy" then
+			Entity:TakeDamage(Damage / 4, BlastData.Owner, BlastData.Gun)
+			debugoverlay.Text(EntPos,"Damage?? " .. (Damage / 4),15,false)
+			print("Applying Squishy " .. (Damage / 4) .. " to " .. tostring(Entity))
+		elseif Type == "Vehicle" then
+			if IsValid(Entity:GetDriver()) then
+				Entity:GetDriver():TakeDamage(Damage / 4, BlastData.Owner, BlastData.Gun)
+			end
+			local HP = Entity.ACF.Health
+			HP = HP - Damage
+			Entity.ACF.Health = HP
+
+			if HP <= 0 then
+				ACF.HEKill(Entity,(BlastData.Origin - (EntPos + VectorRand(-CrossSectionalArea / 10,CrossSectionalArea / 10))):GetNormalized(),BlastData.Origin,E * 2.5)
+			end
+
+			print("Applying Seat " .. Damage .. " to " .. tostring(Entity))
+			debugoverlay.Text(EntPos,"Damage?? " .. Damage ,15,false)
+		else
+			local HP = Entity.ACF.Health
+			HP = HP - Damage
+			print("Applying Prop " .. Damage .. " to " .. tostring(Entity),Entity.ACF.Health .. " TO " .. HP)
+
+			Entity.ACF.Health = HP
+
+			if HP <= 0 then
+				ACF.HEKill(Entity,(BlastData.Origin - (EntPos + VectorRand(-CrossSectionalArea / 10,CrossSectionalArea / 10))):GetNormalized(),BlastData.Origin,E * 2.5)
+			end
+			--debugoverlay.Text(EntPos,"Damage?? " .. Damage ,15,false)
+		end
+
+		return E
+	end
 
 	hook.Add("ACF_OnPlayerLoaded", "ACF Render Damage", function(Player)
 		for _, Entity in ipairs(ents.GetAll()) do
@@ -664,6 +960,7 @@ do -- Remove Props ------------------------------
 	end
 
 	function ACF.APKill(Entity, Normal, Power)
+		if not IsValid(Entity) then return end -- Somehow this isn't valid anymore
 		ACF.KillChildProps(Entity, Entity:GetPos(), Power) -- kill the children of this ent, instead of disappearing them from removing parent
 
 		DebrisNetter(Entity, Normal, Power, true, false)

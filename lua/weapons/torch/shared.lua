@@ -63,12 +63,6 @@ function SWEP:Initialize()
 			IsTorch   = true, -- We need to let people know this isn't a regular bullet somehow
 			Owner     = true,
 			Gun       = self,
-			Caliber   = 0.5,
-			Diameter  = 0.5,
-			ProjArea  = math.pi * 0.25 ^ 2,
-			ProjMass  = 1,
-			Flight    = true,
-			Speed     = self.MaxDistance ^ 0.5 * 39.37,
 		}
 
 		function self.Bullet:GetPenetration()
@@ -164,14 +158,17 @@ function SWEP:PrimaryAttack()
 
 			if OldHealth >= MaxHealth then return end
 
-			local OldArmor = Entity.ACF.Armour
-			local MaxArmor = Entity.ACF.MaxArmour
+			local Health = math.min(OldHealth + math.min(ACF.TorchDamage * 5,MaxHealth * 0.01), MaxHealth)
+			print(math.min(ACF.TorchDamage * 5,MaxHealth * 0.01))
 
-			local Health = math.min(OldHealth + (30 / MaxArmor), MaxHealth)
-			local Armor = MaxArmor * (0.5 + Health / MaxHealth * 0.5)
+			local OldArmor = Entity.ACF.Armour or 0
+			local MaxArmor = Entity.ACF.MaxArmour or 0
+			if Entity:GetNW2Bool("ACF.Volumetric",false) == false then
+				local Armor = MaxArmor * (0.5 + Health / MaxHealth * 0.5)
+				Entity.ACF.Armour = Armor
+			end
 
 			Entity.ACF.Health = Health
-			Entity.ACF.Armour = Armor
 
 			if Entity.ACF_OnRepaired then
 				Entity:ACF_OnRepaired(OldArmor, OldHealth, Armor, Health)

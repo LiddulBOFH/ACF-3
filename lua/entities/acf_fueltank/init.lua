@@ -267,7 +267,7 @@ function ENT:ACF_Activate(Recalc)
 	end
 
 	local Armour = self.EmptyMass * 1000 / self.ACF.Area / 0.78 --So we get the equivalent thickness of that prop in mm if all it's weight was a steel plate
-	local Health = self.ACF.Volume / ACF.Threshold --Setting the threshold of the prop Area gone
+	local Health = ACF.Armor.CalculateHealth(self,7.84,self.ACF.Area / 6.45) --Setting the threshold of the prop Area gone
 	local Percent = 1
 
 	if Recalc and self.ACF.Health and self.ACF.MaxHealth then
@@ -331,7 +331,8 @@ function ENT:Detonate()
 	local ExplosiveMass = (math.max(self.Fuel, self.Capacity * 0.0025) / self.FuelDensity) * 0.1
 
 	ACF_KillChildProps(self, Pos, ExplosiveMass)
-	ACF.HE(Pos, ExplosiveMass, ExplosiveMass * 0.5, self.Inflictor, {self}, self)
+
+	ACF.HE({Origin = Pos,ExplosiveMass = ExplosiveMass,FragMass = ExplosiveMass * 0.5,Inflictor = self.Inflictor},{self},self)
 
 	local Effect = EffectData()
 		Effect:SetOrigin(Pos)

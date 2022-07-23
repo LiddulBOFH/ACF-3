@@ -144,6 +144,7 @@ do -- Debris Effects ------------------------
 		Debris:SetAngles(Data.Angles)
 		Debris:SetColor(Data.Color)
 		Debris:SetMaterial(Data.Material)
+		Debris:SetCollisionGroup(COLLISION_GROUP_WORLD)
 
 		if not CollideAll:GetBool() then
 			Debris:SetCollisionGroup(COLLISION_GROUP_WORLD)
@@ -161,7 +162,7 @@ do -- Debris Effects ------------------------
 
 		local PhysObj = Debris:GetPhysicsObject()
 
-		if IsValid(PhysObj) then
+		if IsValid(PhysObj) and not PhysObj:IsAsleep() then
 			PhysObj:ApplyForceOffset(Data.Normal * Data.Power, Data.Position + VectorRand() * 20)
 		end
 
@@ -187,6 +188,7 @@ do -- Debris Effects ------------------------
 		Gib:SetModelScale(math.Rand(0.5, 2))
 		Gib:SetMaterial(Data.Material)
 		Gib:SetColor(Data.Color)
+		Gib:SetCollisionGroup(COLLISION_GROUP_WORLD)
 		Gib:Spawn()
 
 		Gib.SmokeParticle = Particle(Gib, "smoke_gib_01")
@@ -197,7 +199,7 @@ do -- Debris Effects ------------------------
 
 		local PhysObj = Gib:GetPhysicsObject()
 
-		if IsValid(PhysObj) then
+		if IsValid(PhysObj) and not PhysObj:IsAsleep() then
 			PhysObj:ApplyForceOffset(Data.Normal * Data.Power, Gib:GetPos() + VectorRand() * 20)
 		end
 

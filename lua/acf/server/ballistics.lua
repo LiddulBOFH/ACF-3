@@ -374,8 +374,10 @@ do -- Terminal ballistics --------------------------
 
 		if Ricochet > 0 and Bullet.Ricochets < 3 then
 			Bullet.Ricochets = Bullet.Ricochets + 1
-			Bullet.NextPos = Trace.HitPos
+			Bullet.NextPos = Trace.HitPos + (Trace.HitNormal * 0.01)
+			local oldFlight = Bullet.Flight
 			Bullet.Flight = (RicochetVector(Bullet.Flight, Trace.HitNormal) + VectorRand() * 0.025):GetNormalized() * Speed * Ricochet
+			if oldFlight:Length() < Bullet.Flight:Length() then print("WE GAINED SPEED!",Speed,Ricochet) end
 
 			HitRes.Ricochet = true
 		end
@@ -405,7 +407,6 @@ do -- Terminal ballistics --------------------------
 
 			return "Ricochet"
 		end
-
 		return false
 	end
 

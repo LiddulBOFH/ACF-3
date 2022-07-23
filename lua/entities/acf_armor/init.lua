@@ -4,6 +4,7 @@ AddCSLuaFile("cl_init.lua")
 include("shared.lua")
 
 local ACF = ACF
+local Network = ACF.Networking
 
 do -- Spawning and Updating
 	local Armors = ACF.Classes.ArmorTypes
@@ -75,15 +76,53 @@ do -- Spawning and Updating
 	end
 
 	function MakeACF_Armor(Player, Pos, Angle, Data)
-		if not Player:CheckLimit("_acf_armor") then return end
+		VerifyData(Data)
+		local Plate
+		local Armor = Armors[Data.ArmorType]
 
-		local Plate = ents.Create("acf_armor")
+		if Primitive then -- use the cool primitive props made by shadowscion, also leveraging the new volumetric armor system
+			Plate = ents.Create("primitive_shape")
+			Plate:Spawn()
+			Plate:Activate()
+			Plate:SetAngles(Angle)
+			Plate:SetPos(Pos)
+			Plate:SetPrimTYPE("cube")
+			Plate:SetPrimMESHPHYS(true)
+			Plate:SetPrimMESHUV(48)
+			local Density = Armor.Density
+
+			if Data.BuildDupeInfo then
+				Plate:SetPrimSIZE(Vector(Data.Width,Data.Height,Data.Thickness * ACF.MmToInch))
+			else
+				Plate:SetPrimSIZE(Vector(Data.PlateSizeX,Data.PlateSizeY,Data.PlateSizeZ * ACF.MmToInch))
+			end
+
+			print(Plate:GetPrimSIZE())
+
+			Plate.Owner = Player
+			Plate.ACF = {}
+			Plate.ACF.Density = Density
+
+			Player:AddCount("primitive", Plate)
+			Player:AddCleanup("primitive", Plate)
+			timer.Simple(1,function()
+				ACF.Armor.SetMassByDensity(Plate,Density)
+			end)
+
+			do -- Mass entity mod removal
+				local EntMods = Data.EntityMods
+
+				if EntMods and EntMods.mass then
+					EntMods.mass = nil
+				end
+			end
+
+			return Plate
+		end
+		if not Player:CheckLimit("_acf_armor") then return end
+		Plate = ents.Create("acf_armor")
 
 		if not IsValid(Plate) then return end
-
-		VerifyData(Data)
-
-		local Armor = Armors[Data.ArmorType]
 
 		local CanSpawn = hook.Run("ACF_PreEntitySpawn", "acf_armor", Player, Data, Armor)
 		if CanSpawn == false then return false end
@@ -165,13 +204,12 @@ end
 do -- ACF Activation and Damage
 	function ENT:ACF_Activate(Recalc)
 		local PhysObj = self.ACF.PhysObj
-		local Volume  = PhysObj:GetVolume()
 
 		if not self.ACF.Area then
 			self.ACF.Area = PhysObj:GetVolume() * 6.45
 		end
 
-		local Health  = Volume / ACF.Threshold * self.Tensile
+		local Health  = ACF.Armor.CalculateHealth(self.ACF.Density)
 		local Percent = 1
 
 		if Recalc and self.ACF.Health and self.ACF.MaxHealth then

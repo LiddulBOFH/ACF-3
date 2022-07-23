@@ -225,7 +225,7 @@ if SERVER then
 	local SpallingSin = math.sqrt(1 - ACF.HEATSpallingArc * ACF.HEATSpallingArc)
 	function Ammo:Detonate(Bullet, HitPos)
 		-- Apply HE damage
-		ACF.HE(HitPos, Bullet.BoomFillerMass, Bullet.CasingMass, Bullet.Owner, Bullet.Filter, Bullet.Gun)
+		ACF.HE({Origin = HitPos,ExplosiveMass = Bullet.BoomFillerMass,FragMass = Bullet.CasingMass,Inflictor = Bullet.Owner},Bullet.Filter,Bullet.Gun,Trace,Bullet)
 
 		-- Find ACF entities in the range of the damage (or simplify to like 6m)
 		local FoundEnts = ents.FindInSphere(HitPos, 250)
@@ -261,6 +261,8 @@ if SERVER then
 			-- If it's out of range, stop here
 			if Penetration == 0 then break end
 
+			print("================================================================================================",Penetrations)
+
 			-- Get the effective armor thickness
 			local BaseArmor = 0
 			local Damage    = nil
@@ -277,13 +279,20 @@ if SERVER then
 				-- TODO: Fix world entity penetration
 				--BaseArmor = Penetration + 1
 			elseif TraceRes.Hit then
-				BaseArmor = Ent.GetArmor and Ent:GetArmor(TraceRes) or Ent.ACF.Armour
+				BaseArmor = ACF.Armor.UniversalGetArmor(Ent,TraceRes)
+				print(">    " .. BaseArmor)
 				-- Enable damage if a valid entity is hit
 				Damage = 0
 			end
 			local SlopeFactor    = BaseArmor / Caliber
 			local Angle          = ACF.GetHitAngle(TraceRes.HitNormal, Direction)
-			local EffectiveArmor = Ent.GetArmor and BaseArmor or BaseArmor / math.abs(math.cos(math.rad(Angle)) ^ SlopeFactor)
+			local EffectiveArmor = Ent.GetArmor and BaseArmor or (BaseArmor / math.abs(math.cos(math.rad(Angle)) ^ SlopeFactor))
+
+			print("HEAT Jet======",Ent,SlopeFactor,Angle,EffectiveArmor)
+			print("ARMOR for " .. tostring(Ent),BaseArmor,Caliber,EffectiveArmor)
+			print("TD=====S",TraceData.start,"E",TraceData.endpos)
+			print("TR=====S",TraceRes.StartPos,"E",TraceRes.HitPos,"HN",TraceRes.HitNormal)
+			PrintTable(TraceData.filter)
 
 			-- Percentage of total jet mass lost to this penetration
 			local LostMassPct =  EffectiveArmor / Penetration
@@ -291,6 +300,7 @@ if SERVER then
 			local Cavity = ACF.HEATCavityMul * math.min(LostMassPct, JetMassPct) * Bullet.JetMass / ACF.CopperDensity -- in cm^3
 			if Damage == 0 then
 				local _Cavity = Cavity * (Penetration / EffectiveArmor) * 0.035 -- Remove when health scales with armor
+				print("VOLUME: " .. _Cavity)
 				ACF_VolumeDamage(Bullet, TraceRes, _Cavity)
 			end
 			-- Reduce the jet mass by the lost mass

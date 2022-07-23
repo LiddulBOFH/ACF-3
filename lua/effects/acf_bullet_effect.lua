@@ -83,6 +83,11 @@ function EFFECT:Init(Data)
 		self:SetAngles(Flight:Angle())
 		self:SetModelScale(BulletData.Caliber * 0.1, 0)
 
+		if Crate then
+			self:SetModel(Crate:GetNW2String("BulletModel","models/munitions/round_100mm_shot.mdl"))
+			self:SetModelScale(Crate:GetNW2Float("BulletScale",BulletData.Caliber * 0.1))
+		end
+
 		self.DrawEffect = CanDraw
 
 		local CustomEffect = hook.Run("ACF_BulletEffect", BulletData.AmmoType)

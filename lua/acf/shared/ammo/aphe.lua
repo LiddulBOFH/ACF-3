@@ -109,7 +109,7 @@ if SERVER then
 			Bullet.Pos = Trace.HitPos - Bullet.Flight:GetNormalized() * Offset
 		end
 
-		ACF.HE(Bullet.Pos, Bullet.FillerMass, Bullet.ProjMass - Bullet.FillerMass, Bullet.Owner, nil, Bullet.Gun)
+		ACF.HE({Origin = Bullet.Pos,ExplosiveMass = Bullet.FillerMass,ProjMass = Bullet.ProjMass,Inflictor = Bullet.Owner},{},Bullet.Gun,Trace,Bullet)
 
 		Ammo.BaseClass.OnFlightEnd(self, Bullet, Trace)
 	end

@@ -544,6 +544,7 @@ do -- Serverside visclip check
 	function ACF.CheckClips(Ent, Pos)
 		if not IsValid(Ent) then return false end
 		if not Ent.ClipData then return false end -- Doesn't have clips
+		if Ent.ACF and Ent.ACF.ArmorCalcType == "Volumetric" then return false end -- Has special clip handling :)
 		if Ent:GetClass() ~= "prop_physics" then return false end -- Only care about props
 		if not Ent:GetPhysicsObject():GetVolume() then return false end -- Spherical collisions applied to it
 

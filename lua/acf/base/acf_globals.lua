@@ -30,6 +30,10 @@ do -- ACF global vars
 	ACF.MaximumArmor       = 5000 -- Maximum possible armor that can be given to an entity
 	ACF.KillIconColor      = Color(200, 200, 48)
 
+	-- Damage that a torch can do per cycle, or 1% of the object's health if higher
+	-- Repair is 5x this, or 1% of the object's health if lower
+	ACF.TorchDamage		   = 1000
+
 	ACF.GunsCanFire        = true
 	ACF.GunsCanSmoke       = true
 	ACF.RacksCanFire       = true
@@ -52,7 +56,7 @@ do -- ACF global vars
 	ACF.DragDiv            = 80 --Drag fudge factor
 	ACF.Scale              = 1 --Scale factor for ACF in the game world
 	ACF.HealthFactor       = 1
-	ACF.Threshold          = 264.7 -- Health Divisor, directly tied to ACF.HealthFactor
+	--ACF.Threshold          = 264.7 -- HERE LIES ACF.THRESHOLD, FOREVER BURIED IN TRASH. SO LONG YOU USELESS WASTE OF MEMORY
 	ACF.ArmorMod           = 1
 	ACF.ArmorFactor        = 1 -- Multiplier for ACF.ArmorMod
 	ACF.Gravity            = Vector(0, 0, -GetConVar("sv_gravity"):GetInt())
