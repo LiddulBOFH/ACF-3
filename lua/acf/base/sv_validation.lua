@@ -184,7 +184,8 @@ function ACF.Check(Entity, ForceUpdate) -- IsValid but for ACF
 	if Entity:IsNextBot() then
 		if not Entity.ACF then
 			ACF.Activate(Entity)
-			Entity.ACF.Mass = Entity:GetMass() or 100
+			Entity.ACF.Mass = 100
+			if Entity.GetMass then Entity.ACF.Mass = Entity:GetMass() end
 			Entity.ACF.Health = 100
 		end
 		return Entity.ACF.Type
@@ -227,8 +228,12 @@ function ACF.Activate(Entity, Recalc)
 	end
 
 	local Area = UpdateArea(Entity, PhysObj)
-	if (PhysObj:GetMesh() or Entity._Mesh) and (Entity.ACF.Type == "Prop") and (not Entity.IsACFEntity) then Entity:SetNW2Float("ACF.Volume",PhysObj:GetVolume()) Entity.ACF.ArmorCalcType = "Volumetric" end
-	--print(Entity.ACF.ArmorCalcType)
+
+	if (PhysObj:GetMesh() or Entity._Mesh) and (Entity.ACF.Type == "Prop") and (not Entity.IsACFEntity) then
+		Entity:SetNW2Float("ACF.Volume",PhysObj:GetVolume())
+		Entity.ACF.ArmorCalcType = "Volumetric"
+	end
+
 	local Percent = 1
 
 	if Entity.ACF.ArmorCalcType == "Volumetric" then

@@ -12,9 +12,7 @@ local Cross = MetaVector.Cross
 
 -- TODO: FINISH TO-DO LIST!
 
--- TODO: Remove time benchmarks from damage functions
 -- TODO: Cleanup debug prints
--- TODO: More downsides to certain materials?
 
 local debugtime = SERVER and 5 or 0.015
 
@@ -605,11 +603,13 @@ function ACF.Armor.GetArmor(trace,density,Bullet)
 	debugoverlay.Text(exit,math.ceil(ACF.Armor.RHAe(armorLength,density)) .. "mm vs " .. Pen .. "mm",debugtime,false)
 
 	--print("ARMOR FROM IMPACT WITH " .. tostring(ent) .. ":" .. ACF.Armor.RHAe(armorLength,density))
-	return ACF.Armor.RHAe(armorLength,density),exit,enter
+	local MaxArmor = math.min(ACF.MaximumArmor, ACF.GetServerNumber("MaxThickness"))
+	local armor = math.Clamp(ACF.Armor.RHAe(armorLength,density),ACF.MinimumArmor,MaxArmor)
+	return armor,exit,enter
 end
 
 if SERVER then
-	function ACF.Armor.Update(entity)
+	function ACF.Armor.Update(entity) -- Just a general update function
 		duplicator.StoreEntityModifier(entity, "mass", {Mass = entity.ACF.Mass})
 
 		entity:SetNW2Float("ACF.Density",entity.ACF.Density)
@@ -617,7 +617,7 @@ if SERVER then
 		ACF.Activate(entity,true)
 	end
 
-	function ACF.Armor.SetMassByDensity(entity,density)
+	function ACF.Armor.SetMassByDensity(entity,density) -- Calculates the mass of the prop, figured by the volume of the physobj and the density supplied
 		if not entity.ACF then return end
 		local PhysObj = entity:GetPhysicsObject()
 		if not IsValid(PhysObj) then print("Invalid PhysObj") return end
@@ -632,7 +632,7 @@ if SERVER then
 		ACF.Armor.Update(entity)
 	end
 
-	function ACF.Armor.UpdateDensityByMass(entity)
+	function ACF.Armor.UpdateDensityByMass(entity) -- Updates the stored density value whenever mass is changed by any means
 		if not entity.ACF then return end
 		local PhysObj = entity:GetPhysicsObject()
 		if not IsValid(PhysObj) then print("Invalid PhysObj") return end
@@ -725,19 +725,16 @@ if SERVER then
 		Queue[ID] = ID
 	end)
 
-	hook.Remove("primitive.updatePhysics","ACF Primitive Watchdog") -- TODO: Remove this hook.Remove, was here so I could update this file without issue
-	hook.Add("primitive.updatePhysics","ACF Primitive Watchdog",function(self, constraints, mass, physprops) --2 is constraint table, 4 is physprops (gravity, material)
+	hook.Remove("Primitive_PostRebuildPhysics","ACF Primitive Watchdog") -- TODO: Remove this hook.Remove, was here so I could update this file without issue
+	hook.Add("Primitive_PostRebuildPhysics","ACF Primitive Watchdog",function(self, props)
 		if self.ACF then
-			self:primitive_RestorePhysics(mass, physprops) -- Regularly call the functions to maintain function
-			self:primitive_RestoreConstraints(constraints)
-
 			ACF.Armor.SetMassByDensity(self,self.ACF.Density)
 
 			self._Mesh = nil
 			self._MeshHitbox = nil
 			Network.Broadcast("ACF.Primitive.CleanClientMesh",self)
 
-			return false
+			props.mass = self.ACF.Mass
 		end
 	end)
 else
@@ -765,10 +762,9 @@ else
 	Network.CreateReceiver("ACF.Primitive.CleanClientMesh",function(EntIDList)
 		for _,v in pairs(EntIDList) do
 			local Ent = Entity(v)
-			if not IsValid(Ent) then print("invalid") continue end
+			if not IsValid(Ent) then continue end
 			Ent._Mesh = nil
 			Ent._MeshHitbox = nil
-			print("Cleaned data for " .. tostring(Ent))
 		end
 	end)
 end

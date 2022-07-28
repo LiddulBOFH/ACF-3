@@ -130,8 +130,6 @@ do -- Spawning and Updating --------------------
 			Entity.BulletData = Ammo:ServerConvert(Data)
 			Entity.BulletData.Crate = Entity:EntIndex()
 
-			PrintTable(Entity.BulletData)
-
 			if Ammo.OnFirst then
 				Ammo:OnFirst(Entity)
 			end

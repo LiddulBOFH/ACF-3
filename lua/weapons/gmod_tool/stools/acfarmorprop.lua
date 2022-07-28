@@ -160,8 +160,6 @@ if CLIENT then
 	local LongestText = 0
 	local LowDensity,HighDensity = 7.84,7.84 -- set to steel, not important
 
-	local function MaxVector(V1,V2) return Vector(math.max(V1.x,V2.x),math.max(V1.y,V2.y),math.max(V1.z,V2.z)) end
-
 	function TOOL.BuildCPanel(Panel) -- TODO: Make a line of text change depending on settings
 		local Presets = vgui.Create("ControlPresets")
 			Presets:AddConVar("acfarmorprop_thickness")
@@ -425,7 +423,6 @@ if CLIENT then
 			local Mass     = math.Round(Weapon:GetNWFloat("WeightMass", 0), 1)
 			local Size     = Ent.MeshTotalSize or (Ent:OBBMaxs() - Ent:OBBMins()) * 0.99
 			local Density  = Ent:GetNW2Float("ACF.Density",1)
-			-- TODO: Line of sight from the hitnormal of the player's trace for nominal thickness
 
 			local MaxArmor = ACF.Armor.RHAe(Size:Length() * 25.4,Density)
 

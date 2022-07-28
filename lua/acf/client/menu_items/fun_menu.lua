@@ -133,6 +133,7 @@ do -- Procedural Armor
 		local SizeX     = Menu:AddSlider("Plate Length (gmu)", 0.25, 420, 2)
 		local SizeY     = Menu:AddSlider("Plate Width (gmu)", 0.25, 420, 2)
 		local SizeZ     = Menu:AddSlider("Plate Thickness (mm)", 5, 1000)
+		local Switch	= Menu:AddCheckBox("Avoid Primitive")
 
 		local ClassBase = Menu:AddCollapsible("Material Information")
 		local ClassName = ClassBase:AddTitle()
@@ -180,6 +181,9 @@ do -- Procedural Armor
 
 			return Z
 		end)
+
+		Switch:SetClientData("AvoidPrimitive","OnValueChanged")
+		Switch:SetConVar("acf_parmorswitch")
 
 		ACF.LoadSortedList(ClassList, ArmorTypes, "Name")
 	end

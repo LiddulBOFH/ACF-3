@@ -173,6 +173,7 @@ elseif CLIENT then
 	CreateClientConVar("acf_debris_gibmultiplier", 1, true, false, "The amount of gibs spawned when created by ACF debris.", 0, 1)
 	CreateClientConVar("acf_debris_giblifetime", 60, true, false, "Defines lifetime in seconds of each debris gib.", 1, 300)
 	CreateClientConVar("acf_debris_lifetime", 60, true, false, "Defines lifetime in seconds of each debris entity.", 1, 300)
+	CreateClientConVar("acf_parmorswitch", 0, true, false, "Turning this on will force acf_armor to spawn, instead of using Shadowscion's Primitive Props when available.", 0, 1)
 
 	-- Display Info Bubble ----------------------
 	local ShowInfo = GetConVar("acf_show_entity_info")
