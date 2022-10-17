@@ -1,12 +1,6 @@
 AddCSLuaFile("cl_init.lua")
 AddCSLuaFile("shared.lua")
 --include('shared.lua')
-
-local ACF   = ACF
-local Clock = ACF.Utilities.Clock
-local Spark = "ambient/energy/NewSpark0%s.wav"
-local Zap   = "weapons/physcannon/superphys_small_zap%s.wav"
-
 SWEP.Weight = 5
 SWEP.AutoSwitchTo = false
 SWEP.AutoSwitchFrom = false
@@ -35,6 +29,9 @@ SWEP.IconLetter = "G"
 SWEP.DrawAmmo = false
 SWEP.DrawCrosshair = true
 SWEP.MaxDistance = 64 * 64 -- Squared distance
+
+local Spark = "ambient/energy/NewSpark0%s.wav"
+local Zap   = "weapons/physcannon/superphys_small_zap%s.wav"
 
 local function TeslaSpark(pos, magnitude)
 	zap = ents.Create("point_tesla")
@@ -66,12 +63,6 @@ function SWEP:Initialize()
 			IsTorch   = true, -- We need to let people know this isn't a regular bullet somehow
 			Owner     = true,
 			Gun       = self,
-			Caliber   = 0.5,
-			Diameter  = 0.5,
-			ProjArea  = math.pi * 0.25 ^ 2,
-			ProjMass  = 1,
-			Flight    = true,
-			Speed     = self.MaxDistance ^ 0.5 * 39.37,
 		}
 
 		function self.Bullet:GetPenetration()
@@ -127,11 +118,11 @@ function SWEP:Think()
 		self:SetNWFloat("MaxArmour", MaxArmor)
 	end
 
-	self:NextThink(Clock.CurTime + 0.05)
+	self:NextThink(ACF.Utilities.Clock.CurTime + 0.05)
 end
 
 function SWEP:PrimaryAttack()
-	self:SetNextPrimaryFire(Clock.CurTime + 0.05)
+	self:SetNextPrimaryFire(ACF.Utilities.Clock.CurTime + 0.05)
 
 	if CLIENT then return end
 
@@ -167,14 +158,17 @@ function SWEP:PrimaryAttack()
 
 			if OldHealth >= MaxHealth then return end
 
-			local OldArmor = Entity.ACF.Armour
-			local MaxArmor = Entity.ACF.MaxArmour
+			local Health = math.min(OldHealth + math.min(ACF.TorchDamage * 5,MaxHealth * 0.01), MaxHealth)
+			print(math.min(ACF.TorchDamage * 5,MaxHealth * 0.01))
 
-			local Health = math.min(OldHealth + (30 / MaxArmor), MaxHealth)
-			local Armor = MaxArmor * (0.5 + Health / MaxHealth * 0.5)
+			local OldArmor = Entity.ACF.Armour or 0
+			local MaxArmor = Entity.ACF.MaxArmour or 0
+			if Entity:GetNW2Bool("ACF.Volumetric",false) == false then
+				local Armor = MaxArmor * (0.5 + Health / MaxHealth * 0.5)
+				Entity.ACF.Armour = Armor
+			end
 
 			Entity.ACF.Health = Health
-			Entity.ACF.Armour = Armor
 
 			if Entity.ACF_OnRepaired then
 				Entity:ACF_OnRepaired(OldArmor, OldHealth, Armor, Health)
@@ -187,7 +181,7 @@ function SWEP:PrimaryAttack()
 end
 
 function SWEP:SecondaryAttack()
-	self:SetNextPrimaryFire(Clock.CurTime + 0.05)
+	self:SetNextPrimaryFire(ACF.Utilities.Clock.CurTime + 0.05)
 
 	if CLIENT then return end
 

@@ -338,7 +338,7 @@ do -- Terminal ballistics --------------------------
 			local Direction = Ballistics.GetRicochetVector(Bullet.Flight, Trace.HitNormal) + VectorRand() * 0.025
 
 			Bullet.Ricochets = Bullet.Ricochets + 1
-			Bullet.NextPos = Trace.HitPos
+			Bullet.NextPos = Trace.HitPos + (Trace.HitNormal * 0.01)
 			Bullet.Flight = Direction:GetNormalized() * Speed * Ricochet
 
 			HitRes.Ricochet = true

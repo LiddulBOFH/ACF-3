@@ -260,7 +260,16 @@ do -- ASSUMING DIRECT CONTROL
 				return
 			end
 
+			if Ent.ACF and Ent.ACF.Density and (Ent.ACF.Health and (Ent.ACF.Health < Ent.ACF.MaxHealth) and (Ent.ACF.ScriptSetMass ~= true)) then
+				return
+			end
+
 			SetMass(self, Number)
+
+			if Ent.ACF and (Ent.ACF.ScriptSetMass == false or true) and Ent.ACF.Density then
+				Ent.ACF.ScriptSetMass = nil
+				ACF.Armor.UpdateDensityByMass(Ent)
+			end
 		end
 	end
 

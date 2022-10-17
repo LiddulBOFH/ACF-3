@@ -58,9 +58,7 @@ do -- Spawning and Updating
 	local function UpdatePlate(Entity, Data, Armor)
 		local Size = Data.Size
 
-		Entity.ArmorClass = Armor
-		Entity.Tensile    = Armor.Tensile
-		Entity.Density    = Armor.Density
+		Entity.ACF.Density = Armor.Density
 
 		Entity:SetNW2String("ArmorType", Armor.ID)
 		Entity:SetSize(Size)
@@ -70,22 +68,56 @@ do -- Spawning and Updating
 			Entity[V] = Data[V]
 		end
 
-		ACF.Activate(Entity)
-
-		Entity.ACF.Mass       = Armor:GetMass(Size.x * Size.y * Size.z)
-		Entity.ACF.LegalMamss = Entity.ACF.Mass
+		ACF.Armor.SetMassByDensity(Entity,Entity.ACF.Density)
 	end
 
 	function MakeACF_Armor(Player, Pos, Angle, Data)
-		if not Player:CheckLimit("_acf_armor") then return end
+		VerifyData(Data)
+		local Plate
+		local Armor = Armors.Get(Data.ArmorType)
 
-		local Plate = ents.Create("acf_armor")
+		if Primitive and true then -- use the cool primitive props made by shadowscion, also leveraging the new volumetric armor system
+			Plate = ents.Create("primitive_shape")
+			Plate:Spawn()
+			Plate:Activate()
+			Plate:SetAngles(Angle)
+			Plate:SetPos(Pos)
+
+			Plate:SetPrimTYPE("cube")
+			Plate:SetPrimMESHPHYS(true)
+			Plate:SetPrimMESHUV(48)
+
+			local Density = Armor.Density
+
+			if Data.BuildDupeInfo then -- Data is saved differently than what is given by the tooldata
+				Plate:SetPrimSIZE(Vector(Data.Width,Data.Height,Data.Thickness * ACF.MmToInch))
+			else
+				Plate:SetPrimSIZE(Vector(Data.PlateSizeX,Data.PlateSizeY,Data.PlateSizeZ * ACF.MmToInch))
+			end
+
+			Plate.Owner = Player
+			Plate.ACF = {}
+			Plate.ACF.Density = Density
+
+			Player:AddCount("primitive", Plate)
+			Player:AddCleanup("primitive", Plate)
+
+			ACF.Armor.SetMassByDensity(Plate,Density)
+
+			do -- Mass entity mod removal
+				local EntMods = Data.EntityMods
+
+				if EntMods and EntMods.mass then
+					EntMods.mass = nil
+				end
+			end
+
+			return Plate
+		end
+		if not Player:CheckLimit("_acf_armor") then return end
+		Plate = ents.Create("acf_armor")
 
 		if not IsValid(Plate) then return end
-
-		VerifyData(Data)
-
-		local Armor = Armors.Get(Data.ArmorType)
 
 		local CanSpawn = hook.Run("ACF_PreEntitySpawn", "acf_armor", Player, Data, Armor)
 		if CanSpawn == false then return false end
@@ -101,6 +133,8 @@ do -- Spawning and Updating
 		Plate:Spawn()
 
 		Plate.Owner     = Player -- MUST be stored on ent for PP
+		Plate.ACF = {}
+		Plate.ACF.Density = Density
 		Plate.DataStore = Entities.GetArguments("acf_armor")
 
 		UpdatePlate(Plate, Data, Armor)
@@ -119,6 +153,12 @@ do -- Spawning and Updating
 			end
 		end
 
+		ACF.Activate(Plate)
+
+		local state = Plate:GetNW2Bool("ACF.Volumetric",false) -- solves some ??????? issue when spawning plates by tool, would break looking at a plate with the armor tool
+		Plate:SetNW2Bool("ACF.Volumetric",false)
+		timer.Simple(0,function() Plate:SetNW2Bool("ACF.Volumetric",state) end)
+
 		return Plate
 	end
 
@@ -129,12 +169,7 @@ do -- Spawning and Updating
 	function ENT:Update(Data)
 		VerifyData(Data)
 
-		local Armor    = Armors.Get(Data.ArmorType)
-		local OldArmor = self.ArmorClass
-
-		if OldArmor.OnLast then
-			OldArmor:OnLast(self)
-		end
+		local Armor = Armors.Get(Data.ArmorType)
 
 		hook.Run("ACF_OnEntityLast", "acf_armor", self, OldClass)
 
@@ -156,76 +191,4 @@ do -- Spawning and Updating
 
 		return true, "Armor plate updated successfully!"
 	end
-
-	function ENT:OnResized(Size)
-		local Mass = self.ArmorClass:GetMass(Size.x * Size.y * Size.z)
-
-		self:GetPhysicsObject():SetMass(Mass)
-	end
-end
-
-do -- ACF Activation and Damage
-	function ENT:ACF_Activate(Recalc)
-		local PhysObj = self.ACF.PhysObj
-		local Volume  = PhysObj:GetVolume()
-
-		if not self.ACF.Area then
-			self.ACF.Area = PhysObj:GetVolume() * 6.45
-		end
-
-		local Health  = Volume / ACF.Threshold * self.Tensile
-		local Percent = 1
-
-		if Recalc and self.ACF.Health and self.ACF.MaxHealth then
-			Percent = self.ACF.Health / self.ACF.MaxHealth
-		end
-
-		self.ACF.Armour    = 1
-		self.ACF.MaxArmour = 1
-		self.ACF.Health    = Health * Percent
-		self.ACF.MaxHealth = Health
-		self.ACF.Ductility = 0
-		self.ACF.Type      = "Prop"
-	end
-
-	function ENT:ACF_OnDamage(Bullet, Trace, Volume)
-		local Entity = Trace.Entity
-		local Armor  = Entity:GetArmor(Trace)
-		local Area   = Bullet.ProjArea
-		local Pen    = Bullet:GetPenetration() -- RHA Penetration
-		local MaxPen = math.min(Armor, Pen)
-		local Damage = isnumber(Volume) and Volume or MaxPen * Area -- Damage is simply the volume of the hole made
-		local HP     = self.ACF.Health
-
-		self.ACF.Health = HP - Damage -- Update health
-
-		--[[
-		print("Damage!")
-		print("    PenCaliber: " .. math.Round(Bullet.Diameter * 10))
-		print("    MaxPen: " .. MaxPen)
-		print("    MaxDamage: " .. Pen * Area)
-		print("    HP: " .. math.Round(HP, 3))
-		print("    Effective Armor: " .. math.Round(Armor))
-		print("    Damage: " .. math.Round(Damage, 3))
-		print("    pdHP: " .. math.Round(self.ACF.Health, 3))
-		print("    Loss: " .. math.Clamp(MaxPen / Pen, 0, 1))
-		]]--
-
-		return { -- Damage report
-			Loss = math.Clamp(MaxPen / Pen, 0, 1), -- Energy loss ratio
-			Damage = Damage,
-			Overkill = math.max(Pen - MaxPen, 0),
-			Kill = Damage > HP
-		}
-	end
-end
-
-function ENT:OnRemove()
-	local Armor = self.ArmorClass
-
-	if Armor.OnLast then
-		Armor.OnLast(self, Armor)
-	end
-
-	WireLib.Remove(self)
 end

@@ -31,6 +31,10 @@ do -- ACF global vars
 	ACF.GunsCanSmoke       = true
 	ACF.RacksCanFire       = true
 
+	-- Damage that a torch can do per cycle, or 1% of the object's health if higher
+	-- Repair is 5x this, or 1% of the object's health if lower
+	ACF.TorchDamage		   = 1000
+
 	-- Unit Conversion
 	ACF.MeterToInch        = 39.3701 -- Meters to inches
 	ACF.gCmToKgIn          = 0.016387064 -- g/cm³ to kg/in³ :face_vomiting: :face_vomiting: :face_vomiting:
@@ -49,7 +53,7 @@ do -- ACF global vars
 	ACF.DragDiv            = 80 --Drag fudge factor
 	ACF.Scale              = 1 --Scale factor for ACF in the game world
 	ACF.HealthFactor       = 1
-	ACF.Threshold          = 264.7 -- Health Divisor, directly tied to ACF.HealthFactor
+	--ACF.Threshold          = 264.7 -- HERE LIES ACF.THRESHOLD, FOREVER BURIED IN TRASH. SO LONG YOU USELESS WASTE OF MEMORY
 	ACF.ArmorMod           = 1
 	ACF.ArmorFactor        = 1 -- Multiplier for ACF.ArmorMod
 	ACF.Gravity            = Vector(0, 0, -GetConVar("sv_gravity"):GetInt())

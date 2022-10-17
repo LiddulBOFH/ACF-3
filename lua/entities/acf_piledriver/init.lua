@@ -254,7 +254,7 @@ do -- Entity Activation ------------------------
 		end
 
 		local Armour  = self.Caliber
-		local Health  = PhysObj:GetVolume() * 2 / ACF.Threshold
+		local Health = ACF.Armor.CalculateHealth(self,7.84)
 		local Percent = 1
 
 		if Recalc and self.ACF.Health and self.ACF.MaxHealth then

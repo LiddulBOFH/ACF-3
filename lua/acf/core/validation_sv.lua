@@ -193,6 +193,16 @@ function ACF.Check(Entity, ForceUpdate) -- IsValid but for ACF
 	local Class = Entity:GetClass()
 	if Baddies[Class] then return false end
 
+	if Entity:IsNextBot() then
+		if not Entity.ACF then
+			ACF.Activate(Entity)
+			Entity.ACF.Mass = 100
+			if Entity.GetMass then Entity.ACF.Mass = Entity:GetMass() end
+			Entity.ACF.Health = 100
+		end
+		return Entity.ACF.Type
+	end
+
 	local PhysObj = Entity:GetPhysicsObject()
 	if not IsValid(PhysObj) then return false end
 
@@ -215,10 +225,14 @@ function ACF.Activate(Entity, Recalc)
 	--Density of steel = 7.8g cm3 so 7.8kg for a 1mx1m plate 1m thick
 	local PhysObj = Entity:GetPhysicsObject()
 
-	if not IsValid(PhysObj) then return end
 	if not Entity.ACF then Entity.ACF = {} end
+	Entity.ACF.Type = GetEntityType(Entity)
 
-	Entity.ACF.Type    = GetEntityType(Entity)
+	if not IsValid(PhysObj) then return end
+
+	-- TODO: Enable old armor system to still be usable but not able to be applied anymore, for compatibility with old dupes (give worse health)
+	Entity.ACF.ArmorCalcType = "Constant" -- Old armor style of set thickness, for engines and stuff
+	Entity.ACF_OnDamage = nil
 	Entity.ACF.PhysObj = PhysObj
 
 	if Entity.ACF_Activate then
@@ -226,22 +240,55 @@ function ACF.Activate(Entity, Recalc)
 		return
 	end
 
-	local Area      = UpdateArea(Entity, PhysObj)
-	local Ductility = math.Clamp(Entity.ACF.Ductility or 0, -0.8, 0.8)
-	local Thickness = UpdateThickness(Entity, PhysObj, Area, Ductility)
-	local Health    = (Area / ACF.Threshold) * (1 + Ductility) -- Setting the threshold of the prop Area gone
-	local Percent   = 1
+	local Area = UpdateArea(Entity, PhysObj)
 
-	if Recalc and Entity.ACF.Health and Entity.ACF.MaxHealth then
-		Percent = Entity.ACF.Health / Entity.ACF.MaxHealth
+	if (Entity._Mesh or PhysObj:GetMesh()) and (Entity.ACF.Type == "Prop") and (not Entity.IsACFEntity) and not Entity.ACF.OldArmor then
+		Entity:SetNW2Float("ACF.Volume",PhysObj:GetVolume())
+		Entity.ACF.ArmorCalcType = "Volumetric"
 	end
 
-	Entity.ACF.Health    = Health * Percent
-	Entity.ACF.MaxHealth = Health
-	Entity.ACF.Armour    = Thickness * (0.5 + Percent * 0.5)
-	Entity.ACF.MaxArmour = Thickness * ACF.ArmorMod
-	Entity.ACF.Ductility = Ductility
+	local Percent = 1
+
+	if Entity.ACF.ArmorCalcType == "Volumetric" then
+		if Recalc and Entity.ACF.Health and Entity.ACF.MaxHealth then
+			Percent = Entity.ACF.Health / Entity.ACF.MaxHealth
+		end
+
+		if not Entity.ACF.Density then
+			ACF.Armor.UpdateDensityByMass(Entity)
+			return -- cancels here because the function above recalls this function
+		end
+
+		local Health = ACF.Armor.CalculateHealth(Entity,Entity.ACF.Density)
+
+		Entity:SetNW2Bool("ACF.Volumetric",true)
+		Entity.ACF.Health = Health * Percent
+		Entity.ACF.MaxHealth = Health
+		Entity.ACF.Armour = nil -- get rid of the stinky
+		Entity.ACF.MaxArmour = nil
+
+		Entity.ACF_OnDamage = ACF.Armor.VolumetricArmor_OnDamage
+		Entity.GetArmor	= ACF.Armor.VolumetricArmor_GetArmor
+
+		--duplicator.ClearEntityModifier(Entity, "ACF_Armor")
+	else
+		local Ductility = math.Clamp(Entity.ACF.Ductility or 0, -0.8, 0.8)
+		local Thickness = UpdateThickness(Entity, PhysObj, Area, Ductility)
+		local Health    = ACF.Armor.CalculateHealth(Entity,7.84) * (1 + Ductility)
+
+		if Recalc and Entity.ACF.Health and Entity.ACF.MaxHealth then
+			Percent = Entity.ACF.Health / Entity.ACF.MaxHealth
+		end
+
+		Entity:SetNW2Bool("ACF.Volumetric",false)
+		Entity.ACF.Health    = Health * Percent
+		Entity.ACF.MaxHealth = Health
+		Entity.ACF.Armour    = Thickness * (0.5 + Percent * 0.5)
+		Entity.ACF.MaxArmour = Thickness * ACF.ArmorMod
+		Entity.ACF.Ductility = Ductility
+	end
 end
+
 
 -- Globalize ------------------------------------
 ACF_CheckLegal = ACF.CheckLegal

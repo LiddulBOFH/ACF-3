@@ -232,7 +232,7 @@ if SERVER then
 	local SpallingSin = math.sqrt(1 - ACF.HEATSpallingArc * ACF.HEATSpallingArc)
 	function Ammo:Detonate(Bullet, HitPos)
 		-- Apply HE damage
-		ACF.HE(HitPos, Bullet.BoomFillerMass, Bullet.CasingMass, Bullet.Owner, Bullet.Filter, Bullet.Gun)
+		ACF.HE({Origin = HitPos,ExplosiveMass = Bullet.BoomFillerMass,FragMass = Bullet.CasingMass,Inflictor = Bullet.Owner},Bullet.Filter,Bullet.Gun,Trace,Bullet)
 
 		-- Find ACF entities in the range of the damage (or simplify to like 6m)
 		local FoundEnts = ents.FindInSphere(HitPos, 250)

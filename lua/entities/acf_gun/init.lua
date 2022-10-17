@@ -784,10 +784,8 @@ do -- Metamethods --------------------------------
 				self.ACF.Area = PhysObj:GetSurfaceArea() * 6.45
 			end
 
-			local Volume = PhysObj:GetVolume() * 2
-
 			local Armour = self.Caliber
-			local Health = Volume / ACF.Threshold --Setting the threshold of the prop Area gone
+			local Health = ACF.Armor.CalculateHealth(self,7.84,PhysObj:GetVolume() * 2)
 			local Percent = 1
 
 			if Recalc and self.ACF.Health and self.ACF.MaxHealth then

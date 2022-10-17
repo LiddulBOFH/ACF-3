@@ -15,6 +15,15 @@ function Ammo:OnLoaded()
 	}
 end
 
+function Ammo:GetPenetration(Bullet, Speed)
+	if not isnumber(Speed) then
+		Speed = Bullet.Flight and Bullet.Flight:Length() / ACF.Scale * 0.0254 or Bullet.MuzzleVel
+	end
+
+	local PenMod = ((Bullet.ProjMass - Bullet.FillerMass) / Bullet.ProjMass) ^ 1.2
+	return ACF.Penetration(Speed, Bullet.ProjMass, Bullet.Diameter * 10) * (PenMod / 10)
+end
+
 function Ammo:GetDisplayData(Data)
 	local FragMass	= Data.ProjMass - Data.FillerMass
 	local Fragments	= math.max(math.floor((Data.FillerMass / FragMass) * ACF.HEFrag), 2)
@@ -68,8 +77,6 @@ function Ammo:BaseConvert(ToolData)
 end
 
 if SERVER then
-	local Ballistics = ACF.Ballistics
-
 	function Ammo:Network(Entity, BulletData)
 		Ammo.BaseClass.Network(self, Entity, BulletData)
 
@@ -81,26 +88,6 @@ if SERVER then
 		local Data = self:GetDisplayData(BulletData)
 
 		return Text:format(math.Round(BulletData.MuzzleVel, 2), math.Round(Data.BlastRadius, 2), math.Round(BulletData.FillerMass * ACF.HEPower, 2))
-	end
-
-	function Ammo:PropImpact(Bullet, Trace)
-		if ACF.Check(Trace.Entity) then
-			local Speed  = Bullet.Flight:Length() / ACF.Scale
-			local Energy = ACF.Kinetic(Speed, Bullet.ProjMass)
-
-			Bullet.Speed  = Speed
-			Bullet.Energy = Energy
-
-			local HitRes = Ballistics.DoRoundImpact(Bullet, Trace)
-
-			if HitRes.Ricochet then return "Ricochet" end
-		end
-
-		return false
-	end
-
-	function Ammo:WorldImpact()
-		return false
 	end
 else
 	ACF.RegisterAmmoDecal("HE", "damage/he_pen", "damage/he_rico")

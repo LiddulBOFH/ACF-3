@@ -98,6 +98,7 @@ do -- Clientside visclip check
 	function ACF.CheckClips(Ent, Pos)
 		if not IsValid(Ent) then return false end
 		if not Ent.ClipData then return false end -- Doesn't have clips
+		if (Ent:GetNW2Bool("ACF.Volumetric") or false) == true then return false end
 		if Ent:GetClass() ~= "prop_physics" then return false end -- Only care about props
 
 		-- Compatibility with Proper Clipping tool: https://github.com/DaDamRival/proper_clipping
@@ -124,6 +125,7 @@ do -- Panel helpers
 			local Count = 0
 
 			for _, Value in pairs(List) do
+				if Value.Hide then continue end
 				Count = Count + 1
 
 				Choices[Count] = Value
