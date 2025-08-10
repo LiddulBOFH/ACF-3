@@ -2,26 +2,12 @@ local TraceData = { start = true, endpos = true, mask = MASK_SOLID }
 local TraceLine = util.TraceLine
 local GetIndex  = ACF.GetAmmoDecalIndex
 local GetDecal  = ACF.GetRicochetDecal
+local Effects   = ACF.Utilities.Effects
 local Sounds    = ACF.Utilities.Sounds
-local Debug		= ACF.Debug
+local Debug     = ACF.Debug
 local White     = Color(255, 255, 255)
 local Yellow    = Color(255, 255, 0)
-
-local Colors = {
-	Default        = Color(120, 110, 100),
-	[MAT_GRATE]    = Color(170, 160, 144),
-	[MAT_CLIP]     = Color(170, 160, 144),
-	[MAT_METAL]    = Color(170, 160, 144),
-	[MAT_COMPUTER] = Color(170, 160, 144),
-	[MAT_CONCRETE] = Color(180, 172, 158),
-	[MAT_DIRT]     = Color(95, 80, 63),
-	[MAT_GRASS]    = Color(114, 100, 80),
-	[MAT_SLOSH]    = Color(104, 90, 70),
-	[MAT_SNOW]     = Color(154, 140, 110),
-	[MAT_FOLIAGE]  = Color(104, 90, 70),
-	[MAT_TILE]     = Color(150, 146, 141),
-	[MAT_SAND]     = Color(180, 155, 100),
-}
+local Colors    = Effects.MaterialColors
 
 function EFFECT:Init(Data)
 	self.Start = CurTime()
@@ -68,10 +54,10 @@ function EFFECT:Init(Data)
 end
 
 function EFFECT:Core(Origin, Radius)
-	local Pitch  = math.Clamp(123 - Radius * 3, 60, 120)
 
-	Sounds.PlaySound(Origin, "ambient/explosions/explode_9.wav", 105, Pitch, 1)
-	Sounds.PlaySound(Origin, "ambient/levels/streetwar/city_battle19.wav", 105, Pitch, 1)
+	local SoundData = Sounds.GetExplosionSoundPath(Radius)
+
+	Sounds.PlaySound(Origin, SoundData.SoundPath:format(math.random(0, 4)), SoundData.SoundVolume, SoundData.SoundPitch, 1)
 end
 
 function EFFECT:GroundImpact(Emitter, Origin, Radius, HitNormal, SmokeColor, Mult)

@@ -24,6 +24,10 @@ local function CreateMenu(Menu)
 	local SizeY        = Menu:AddSlider("#acf.menu.baseplates.plate_length", 36, 420, 2)
 	local SizeZ        = Menu:AddSlider("#acf.menu.baseplates.plate_thickness", 0.5, 3, 2)
 
+	local DisableAltE  = Menu:AddCheckBox("#acf.menu.baseplates.disable_alt_e")
+	local GForceTicks = Menu:AddSlider("#acf.menu.baseplates.gforce_ticks", 1, 7, 0)
+	Menu:AddHelp("#acf.menu.baseplates.gforce_ticks_info")
+
 	local BaseplateBase     = Menu:AddCollapsible("#acf.menu.baseplates.baseplate_info", nil, "icon16/shape_square_edit.png")
 	local BaseplateName     = BaseplateBase:AddTitle()
 	local BaseplateDesc     = BaseplateBase:AddLabel()
@@ -82,6 +86,17 @@ local function CreateMenu(Menu)
 
 		return Z
 	end)
+
+	GForceTicks:SetClientData("GForceTicks", "OnValueChanged")
+	GForceTicks:DefineSetter(function(Panel, _, _, Value)
+		local Ticks = math.Round(Value, 0)
+
+		Panel:SetValue(Ticks)
+
+		return Ticks
+	end)
+
+	DisableAltE:SetClientData("DisableAltE", "OnChange")
 
 	local BaseplateConvertInfo = Menu:AddCollapsible("#acf.menu.baseplates.convert")
 	local BaseplateConvertText = ""

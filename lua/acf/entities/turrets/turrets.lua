@@ -14,12 +14,14 @@ local InchToMm = ACF.InchToMm
 -- Bunched all of the definitions together due to some loading issue
 
 do	-- Turret drives
+	local Clamp = math.Clamp
+
 	local function ClampAngle(A, Amin, Amax)
 		local p, y, r
 
-		if A.p < Amin.p then p = Amin.p elseif A.p > Amax.p then p = Amax.p else p = A.p end
-		if A.y < Amin.y then y = Amin.y elseif A.y > Amax.y then y = Amax.y else y = A.y end
-		if A.r < Amin.r then r = Amin.r elseif A.r > Amax.r then r = Amax.r else r = A.r end
+		p = Clamp(A[1], Amin[1], Amax[1])
+		y = Clamp(A[2], Amin[2], Amax[2])
+		r = Clamp(A[3], Amin[3], Amax[3])
 
 		return Angle(p, y, r)
 	end
@@ -195,20 +197,21 @@ do	-- Turret drives
 				end,
 
 				GetTargetBearing	= function(Turret, StabAmt)
-					local Rotator = Turret.Rotator
+					local TurretTbl = Turret:GetTable()
+					local Rotator = TurretTbl.Rotator
 
-					if Turret.HasArc then
-						if Turret.Manual then
-							return Rotator:WorldToLocalAngles(Turret:LocalToWorldAngles(Angle(0, -math.Clamp(Turret.DesiredDeg, Turret.MinDeg, Turret.MaxDeg), 0))).yaw
+					if TurretTbl.HasArc then
+						if TurretTbl.Manual then
+							return Rotator:WorldToLocalAngles(Turret:LocalToWorldAngles(Angle(0, -math.Clamp(TurretTbl.DesiredDeg, TurretTbl.MinDeg, TurretTbl.MaxDeg), 0))).yaw
 						else
-							local AngDiff	= Turret.Rotator:WorldToLocalAngles(Turret.LastRotatorAngle)
-							local LocalDesiredAngle = ClampAngle(Turret:WorldToLocalAngles(Turret.DesiredAngle) - Angle(0, StabAmt, 0) - AngDiff, Angle(0, -Turret.MaxDeg, 0), Angle(0, -Turret.MinDeg, 0))
+							local AngDiff = Rotator:WorldToLocalAngles(TurretTbl.LastRotatorAngle)
+							local LocalDesiredAngle = ClampAngle(Turret:WorldToLocalAngles(TurretTbl.DesiredAngle) - Angle(0, StabAmt, 0) - AngDiff, Angle(0, -TurretTbl.MaxDeg, 0), Angle(0, -TurretTbl.MinDeg, 0))
 
 							return Rotator:WorldToLocalAngles(Turret:LocalToWorldAngles(LocalDesiredAngle)).yaw
 						end
 					else
-						local AngDiff	= Turret.Rotator:WorldToLocalAngles(Turret.LastRotatorAngle)
-						return Turret.Manual and (Rotator:WorldToLocalAngles(Turret:LocalToWorldAngles(Angle(0, -Turret.DesiredDeg, 0))).yaw) or (Rotator:WorldToLocalAngles(Turret.DesiredAngle + AngDiff).yaw - StabAmt)
+						local AngDiff = Rotator:WorldToLocalAngles(TurretTbl.LastRotatorAngle)
+						return TurretTbl.Manual and (Rotator:WorldToLocalAngles(Turret:LocalToWorldAngles(Angle(0, -TurretTbl.DesiredDeg, 0))).yaw) or (Rotator:WorldToLocalAngles(TurretTbl.DesiredAngle + AngDiff).yaw - StabAmt)
 					end
 				end,
 
@@ -275,18 +278,19 @@ do	-- Turret drives
 				end,
 
 				GetTargetBearing	= function(Turret, StabAmt)
-					local Rotator = Turret.Rotator
+					local TurretTbl = Turret:GetTable()
+					local Rotator = TurretTbl.Rotator
 
-					if Turret.HasArc then
-						if Turret.Manual then
-							return Rotator:WorldToLocalAngles(Turret:LocalToWorldAngles(Angle(math.Clamp(-Turret.DesiredDeg, Turret.MinDeg, Turret.MaxDeg), 0, 0))).pitch
+					if TurretTbl.HasArc then
+						if TurretTbl.Manual then
+							return Rotator:WorldToLocalAngles(Turret:LocalToWorldAngles(Angle(math.Clamp(-TurretTbl.DesiredDeg, TurretTbl.MinDeg, TurretTbl.MaxDeg), 0, 0))).pitch
 						else
-							local LocalDesiredAngle = ClampAngle(Turret:WorldToLocalAngles(Turret.DesiredAngle) - Angle(StabAmt, 0, 0), Angle(-Turret.MaxDeg, 0, 0), Angle(-Turret.MinDeg, 0, 0))
+							local LocalDesiredAngle = ClampAngle(Turret:WorldToLocalAngles(TurretTbl.DesiredAngle) - Angle(StabAmt, 0, 0), Angle(-TurretTbl.MaxDeg, 0, 0), Angle(-TurretTbl.MinDeg, 0, 0))
 
 							return Rotator:WorldToLocalAngles(Turret:LocalToWorldAngles(LocalDesiredAngle)).pitch
 						end
 					else
-						return Turret.Manual and (Rotator:WorldToLocalAngles(Turret:LocalToWorldAngles(Angle(-Turret.DesiredDeg, 0, 0))).pitch) or (Rotator:WorldToLocalAngles(Turret.DesiredAngle).pitch - StabAmt)
+						return TurretTbl.Manual and (Rotator:WorldToLocalAngles(Turret:LocalToWorldAngles(Angle(-TurretTbl.DesiredDeg, 0, 0))).pitch) or (Rotator:WorldToLocalAngles(TurretTbl.DesiredAngle).pitch - StabAmt)
 					end
 				end,
 

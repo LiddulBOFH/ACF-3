@@ -37,7 +37,14 @@ do -- Random timer crew stuff
 		local Sum, Count = Sum1 + Sum2, Count1 + Count2
 		local Val = (Count > 0) and (Sum / Count) or 0
 		self.FuelCrewMod = math.Clamp(Val, ACF.CrewFallbackCoef, 1)
+		if self.BaseplateClass.Name == "Recreational" then
+			self.FuelCrewMod = 1 -- Recreational baseplates have no fuel consumption
+		end
 		return self.FuelCrewMod
+	end
+
+	function ENT:EnforceLooped()
+		if self.BaseplateClass.EnforceLooped then self.BaseplateClass.EnforceLooped(self) end
 	end
 end
 
@@ -71,7 +78,7 @@ local function ConfigureLuaSeat(Entity, Pod, Player)
 			local Contraption = Ent:GetContraption()
 			if Contraption then
 				local Base = Contraption.Base
-				if Base == Entity and IsValid(Pod) and Pod:GetDriver() ~= Ply then
+				if Base == Entity and IsValid(Pod) and Pod:GetDriver() ~= Ply and not Entity:ACF_GetUserVar("DisableAltE") then
 					Ply:EnterVehicle(Pod)
 				end
 			end
@@ -82,7 +89,7 @@ local function ConfigureLuaSeat(Entity, Pod, Player)
 	Entity:CallOnRemove("ACF_RemoveVehiclePod", function(Ent)
 		hook.Remove("PlayerEnteredVehicle", "ACFBaseplateSeatEnter" .. Entity:EntIndex())
 		hook.Remove("PlayerLeaveVehicle", "ACFBaseplateSeatExit" .. Entity:EntIndex())
-		hook.Remove( "PlayerUse", "ACFBaseplateSeatEnterExternal" .. Entity:EntIndex())
+		hook.Remove("PlayerUse", "ACFBaseplateSeatEnterExternal" .. Entity:EntIndex())
 
 		local Owner = Entity:CPPIGetOwner()
 		if IsValid(Owner) then Owner:GodDisable() end
@@ -105,6 +112,7 @@ ACF.ActiveBaseplatesTable = ACF.ActiveBaseplatesTable or {}
 
 function ENT.ACF_OnVerifyClientData(ClientData)
 	ClientData.Size = Vector(ClientData.Length, ClientData.Width, ClientData.Thickness)
+	if ClientData.BaseplateType ~= "Aircraft" then ClientData.GForceTicks = 1 end -- Only allow sample rates > 1 for aircraft baseplates
 end
 
 function ENT:ACF_PostUpdateEntityData(ClientData)
@@ -133,6 +141,7 @@ function ENT:ACF_PostSpawn(Owner, _, _, ClientData)
 		ACF.Contraption.SetMass(self, self.ACF.Mass or 1)
 	else
 		ACF.Contraption.SetMass(self, 1000)
+		duplicator.StoreEntityModifier(self, "mass", { Mass = 1000 })
 	end
 
 	WireIO.SetupOutputs(self, Outputs, ClientData)
@@ -147,8 +156,28 @@ function ENT:ACF_PostSpawn(Owner, _, _, ClientData)
 		end
 	end
 
+	hook.Add("PhysgunPickup", "ACFBaseplatePickup" .. self:EntIndex(), function( _, ent )
+		local Contraption = ent.GetContraption and ent:GetContraption()
+		if Contraption ~= nil then
+			Contraption.IsPickedUp = true
+		end
+	end)
+
+	hook.Add("PhysgunDrop", "ACFBaseplateDrop" .. self:EntIndex(), function( _, ent )
+		local Contraption = ent.GetContraption and ent:GetContraption()
+		if Contraption ~= nil then
+			Contraption.IsPickedUp = false
+		end
+	end)
+
+	self:CallOnRemove("ACF_RemovePickupHooks", function()
+		hook.Remove("PhysgunPickup", "ACFBaseplatePickup" .. self:EntIndex())
+		hook.Remove("PhysgunDrop", "ACFBaseplateDrop" .. self:EntIndex())
+	end)
+
 	ACF.AugmentedTimer(function(cfg) self:UpdateAccuracyMod(cfg) end, function() return IsValid(self) end, nil, {MinTime = 0.5, MaxTime = 1})
 	ACF.AugmentedTimer(function(cfg) self:UpdateFuelMod(cfg) end, function() return IsValid(self) end, nil, {MinTime = 1, MaxTime = 2})
+	ACF.AugmentedTimer(function(cfg) self:EnforceLooped(cfg) end, function() return IsValid(self) end, nil, {MinTime = 1, MaxTime = 2})
 	ACF.ActiveBaseplatesTable[self] = true
 	self:CallOnRemove("ACF_RemoveBaseplateTableIndex", function(ent) ACF.ActiveBaseplatesTable[ent] = nil end)
 end
@@ -185,7 +214,7 @@ do
 	end)
 end
 
-function ENT:CFW_OnParentedTo(_, NewEntity)
+function ENT:CFW_PreParentedTo(_, NewEntity)
 	if IsValid(NewEntity) then
 		local Owner = self:CPPIGetOwner()
 		if IsValid(Owner) then
@@ -196,10 +225,11 @@ function ENT:CFW_OnParentedTo(_, NewEntity)
 	return false
 end
 
-local Text = "%s Baseplate\n\nBaseplate Size: %.1f x %.1f x %.1f\nBaseplate Health: %.1f%%"
+local Text = "%s Baseplate\n\nBaseplate Size: %.1f x %.1f x %.1f\nBaseplate Health: %.1f%%\nTick Interval: %s"
 function ENT:UpdateOverlayText()
 	local h, mh = self.ACF.Health, self.ACF.MaxHealth
-	return Text:format(self.BaseplateClass.Name, self.Size[1], self.Size[2], self.Size[3], (h / mh) * 100)
+	local AltEDisabled = self:ACF_GetUserVar("DisableAltE") and "\n(Alt + E Entry Disabled)" or ""
+	return Text:format(self.BaseplateClass.Name, self.Size[1], self.Size[2], self.Size[3], (h / mh) * 100, self:ACF_GetUserVar("GForceTicks")) .. AltEDisabled
 end
 
 function ENT:Think()

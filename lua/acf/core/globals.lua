@@ -142,6 +142,8 @@ do -- ACF global vars
 	ACF.MaximumArmor         = 5000  -- Maximum possible armor that can be given to an entity
 	ACF.MinDuctility         = -80   -- The minimum amount of ductility that can be set on an entity
 	ACF.MaxDuctility         = 80    -- The maximum amount of ductility that can be set on an entity
+	ACF.MinimumMass          = 0.1   -- The minimum amount of mass that can be set on an entity
+	ACF.MaximumMass          = 50000 -- The maximum amount of mass that can be set on an entity
 	ACF.DefineSetting("MaxThickness",       300,    nil, ACF.FloatDataCallback(ACF.MinimumArmor, ACF.MaximumArmor, 0))
 
 	ACF.DefineSetting("SmokeWind",          20,     "Wind smoke multiplier has been set to a factor of %.2f.", ACF.FloatDataCallback(0, 1000, 2))
@@ -150,11 +152,13 @@ do -- ACF global vars
 	ACF.DefineSetting("KEPush",             true,   "Kinetic energy entity pushing has been %s.", ACF.BooleanDataCallback())
 	ACF.DefineSetting("RecoilPush",         true,   "Recoil entity pushing has been %s.", ACF.BooleanDataCallback())
 
-	ACF.DefineSetting("AllowFunEnts",        true,   "Fun Entities have been %s.", ACF.BooleanDataCallback())
+	ACF.DefineSetting("AllowFunEnts",          true,    "Fun Entities have been %s.", ACF.BooleanDataCallback())
 	ACF.DefineSetting("AllowArbitraryParents", false,   "Arbitrary parenting has been %s.", ACF.BooleanDataCallback())
-	ACF.DefineSetting("AllowSpecialEngines", true,  "Special engines have been %s.", ACF.BooleanDataCallback())
-	ACF.DefineSetting("ShowFunMenu",         true,   "The Fun Entities menu option has been %s.", ACF.BooleanDataCallback())
-	ACF.DefineSetting("AllowProcArmor",      false,  "Procedural armor has been %s.", ACF.BooleanDataCallback(function(Value)
+	ACF.DefineSetting("AllowSpecialEngines",   true,    "Special engines have been %s.", ACF.BooleanDataCallback())
+	ACF.DefineSetting("AllowDynamicLinking",   false,   "Dynamic ACF linking has been %s.", ACF.BooleanDataCallback())
+	ACF.DefineSetting("ShowFunMenu",           true,    "The Fun Entities menu option has been %s.", ACF.BooleanDataCallback())
+	ACF.DefineSetting("DetachedPhysmassRatio", false,   "Detached entities affecting mass ratio has been %s.", ACF.BooleanDataCallback())
+	ACF.DefineSetting("AllowProcArmor",        false,   "Procedural armor has been %s.", ACF.BooleanDataCallback(function(Value)
 		ACF.GlobalFilter["acf_armor"] = not Value
 		return Value
 	end))
@@ -204,7 +208,9 @@ do -- ACF global vars
 	ACF.DragDiv              = 80 -- Drag fudge factor
 	ACF.Scale                = 1 -- Scale factor for ACF in the game world
 	ACF.Gravity              = Vector(0, 0, -GetConVar("sv_gravity"):GetInt())
-	ACF.GlobalFilter = { -- Global ACF filter
+
+	-- WE WANT NO INTERACTION WITH THESE ENTITIES
+	ACF.GlobalFilter = {
 		gmod_ghost = true,
 		acf_debris = true,
 		prop_ragdoll = true,
@@ -216,7 +222,14 @@ do -- ACF global vars
 		npc_dog = true,
 		phys_bone_follower = true,
 		acf_armor = not ACF.AllowProcArmor, -- Procedural armor filter
-		starfall_prop = true
+		gmod_wire_expression2 = true,
+		starfall_processor = true,
+		sent_prop2mesh = true,
+	}
+
+	-- THESE ENTITIES ARE FILTERED BUT CAN STILL BE ARMORED, FOR BACKWARDS COMPATIBILITY
+	ACF.ArmorableGlobalFilterExceptions = {
+		sent_prop2mesh = true,
 	}
 
 	ACF.AmbientTemperature   = 288.15 -- Ambient temperature in kelvin (15°C @ sea level) from google search
@@ -336,10 +349,14 @@ do -- ACF global vars
 	ACF.GearEfficiency     = 0.95 -- The percentage of RPM efficiency kept when increasing the gear count
 	ACF.GearboxMassScale   = 3 -- The exponent to determine the gearbox's mass in proportion to its scale
 	ACF.GearboxTorqueScale = 3 -- The exponent to determine the gearbox's torque in proportion to its scale
-	ACF.TorqueMult         = 2 -- The arbitrary multiplier for the final amount of torque; TODO: we should probably implement this in a better way
+	-- The arbitrary multiplier for the final amount of torque; TODO: we should probably implement this in a better way
+	ACF.DefineSetting("TorqueMult", 5, "The arbitrary multiplier for the final amount of torque. Stopgap measure until a future engine update.", ACF.FloatDataCallback(0, 10, 2))
 	ACF.MinGearRatio       = -10 -- The minimum value that a gear's ratio can be set to
 	ACF.MaxGearRatio       = 10 -- The maximum value that a gear's ratio can be set to
+	ACF.MinCVTRatio        = 1 -- The minimum value that a CVT's ratio can be set to
 	ACF.MaxCVTRatio        = 100 -- The maximum value that a CVT's ratio can be set to
+	ACF.MinGearRatioLegacy = -1 -- The minimum value that a gear's ratio can be set to (legacy)
+	ACF.MaxGearRatioLegacy = 1 -- The maximum value that a gear's ratio can be set to (legacy)
 end
 
 do -- ACF Convars & Particles
@@ -384,13 +401,20 @@ elseif CLIENT then
 	-- Display Info Bubble ----------------------
 	local ShowInfo = GetConVar("acf_show_entity_info")
 
+	-- We cache these in upvalues rather than performing C calls a ton.
+	-- The HideInfoBubble function gets called a LOT!!!!
+	-- I have no idea if this will actually imrpove performance yet... we'll see
+	local ShowInfo_Value, LocalPlayer_InVehicle = 0, false
+	timer.Create("ACF_HideInfo_ResyncCData", 0.1, 0, function()
+		ShowInfo_Value = ShowInfo:GetInt()
+		local Player = LocalPlayer()
+		LocalPlayer_InVehicle = IsValid(Player) and Player:InVehicle() or false
+	end)
 	function ACF.HideInfoBubble()
-		local Value = ShowInfo:GetInt()
+		if ShowInfo_Value == 0 then return true end
+		if ShowInfo_Value == 2 then return false end
 
-		if Value == 0 then return true end
-		if Value == 2 then return false end
-
-		return LocalPlayer():InVehicle()
+		return LocalPlayer_InVehicle
 	end
 	---------------------------------------------
 
