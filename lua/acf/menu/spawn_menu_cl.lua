@@ -82,6 +82,7 @@ do -- Menu population functions
 	end
 
 	ACF.AddMenuOption(1, "#acf.menu.about", "information")
+	ACF.AddMenuOption(2, "#acf.menu.dupe", "arrow_down")
 	ACF.AddMenuOption(101, "#acf.menu.settings", "wrench")
 	ACF.AddMenuOption(102, "#acf.menu.permissions", "gun")
 	ACF.AddMenuOption(201, "#acf.menu.entities", "brick")
@@ -276,12 +277,15 @@ do -- ACF Menu context panel
 			ACF.SetToolMode("acf_menu", "Main", "Idle")
 			ACF.SetClientData("Destiny")
 
+			Menu:ClearPostBuildFns()
 			Menu:ClearTemporal()
 			Menu:StartTemporal()
 
-			Node.Action(Menu)
+			-- Fixes menu errors just killing everything
+			xpcall(function() Node.Action(Menu) end, function(err) ErrorNoHaltWithStack(err) end)
 
 			Menu:EndTemporal()
+			Menu:ExecutePostBuildFns()
 		end
 
 		PopulateTree(Tree)

@@ -40,12 +40,12 @@ net.Receive("ACF_Crew_Spawn", function()
 	Ent.PlayerModel = PlayerModel
 	Ent.PlayerModelBodygroups = PlayerModelBodygroups
 	Ent.PlayerModelSkin = PlayerModelSkin
-	print(PlayerModel, PlayerModelBodygroups, PlayerModelSkin)
-	Ent:CreateCrewHolo(ModelID, PoseID)
+
+	Ent:CreateCrewHolo(PoseID)
 end)
 
-function ENT:CreateCrewHolo(ModelID, PoseID)
-	local ClassData = CrewPoses.GetItem(ModelID, PoseID)
+function ENT:CreateCrewHolo(PoseID)
+	local ClassData = CrewPoses.Get(PoseID)
 	if self.CrewHolo then self.CrewHolo:Remove() end -- Remove existing crew holo if it exists
 	if not ClassData then return end
 	self.CrewHolo = ClientsideModel(self.PlayerModel)

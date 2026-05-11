@@ -1,6 +1,8 @@
-local ACF     = ACF
-local Classes = ACF.Classes
-local math    = math
+local ACF      = ACF
+local Classes  = ACF.Classes
+local math     = math
+local MM_TO_CM = ACF.MmToInch * ACF.InchToCm -- Millimeters to centimeters
+
 
 local function GetWeaponSpecs(ToolData)
 	local Source = Classes[ToolData.Destiny]
@@ -49,10 +51,10 @@ function ACF.RoundBaseGunpowder(ToolData, Data)
 	if not Specs then return Data, GUIData end
 
 	local Length    = math.Round(Specs.MaxLength * (Data.LengthAdj or 1), 2)
-	local Radius    = Specs.Caliber * 0.05 -- Radius in cm
+	local Radius    = Specs.Caliber * MM_TO_CM * 0.5 -- Radius in cm
 	local CaseScale = ToolData.CasingScale or ACF.AmmoCaseScale
 
-	Data.Caliber    = Specs.Caliber * 0.1 -- Bullet caliber will have to stay in cm
+	Data.Caliber    = Specs.Caliber * MM_TO_CM -- Bullet caliber will have to stay in cm
 	Data.Diameter   = Data.Caliber * (Data.ProjScale or 1) -- Real caliber of the projectile
 	Data.ProjArea   = math.pi * (Radius * (Data.ProjScale or 1)) ^ 2
 	Data.PropArea   = math.pi * (Radius * (Data.PropScale or 1) * CaseScale) ^ 2
@@ -75,7 +77,7 @@ function ACF.UpdateRoundSpecs(ToolData, Data, GUIData)
 	Data.Priority = Data.Priority or "Projectile"
 	Data.Tracer   = ToolData.Tracer and math.Round(Data.Caliber * 0.15, 2) or 0
 
-	local Projectile = math.Clamp(ToolData.Projectile + Data.Tracer, GUIData.MinProjLength, GUIData.MaxProjLength)
+	local Projectile = math.Clamp(ToolData.Projectile, GUIData.MinProjLength, GUIData.MaxProjLength)
 	local Propellant = math.Clamp(ToolData.Propellant, GUIData.MinPropLength, GUIData.MaxPropLength)
 
 	if Data.Priority == "Projectile" then
@@ -84,7 +86,7 @@ function ACF.UpdateRoundSpecs(ToolData, Data, GUIData)
 		Projectile = math.min(Projectile, GUIData.MaxRoundLength - Propellant, GUIData.MaxProjLength)
 	end
 
-	local ProjLength = math.Round(Projectile, 2) - Data.Tracer
+	local ProjLength = math.Round(Projectile, 2)
 	local PropLength = math.Round(Propellant, 2)
 	local ProjVolume = Data.ProjArea * ProjLength
 	local PropVolume = Data.PropArea * PropLength
@@ -235,171 +237,242 @@ function ACF.GetWeaponValue(Key, Caliber, Class, Weapon)
 	return Lerp(Percent, Values.Min, Values.Max)
 end
 
-do -- Ammo crate capacity calculation
-	local Axises = {
-		x = { Y = "y", Z = "z", Ang = Angle() },
-		y = { Y = "x", Z = "z", Ang = Angle(0, 90) },
-		z = { Y = "x", Z = "y", Ang = Angle(90, 90) }
-	}
+do -- MARK: Ammo capacity
 
-	local function GetBoxDimensions(Axis, Size)
-		local AxisInfo = Axises[Axis]
-		local Y = Size[AxisInfo.Y]
-		local Z = Size[AxisInfo.Z]
+	-- Packing constants
+	local HEX_SPACING = 0.866 -- sqrt(3)/2 for hexagonal packing Y-axis spacing
+	local HEX_OFFSET  = 0.5   -- Z-axis offset for alternating rows
 
-		return Size[Axis], Y, Z, AxisInfo.Ang
+	-- Math functions
+	local floor = math.floor
+	local max   = math.max
+	local cos   = math.cos
+	local sin   = math.sin
+	local rad   = math.rad
+	local pi    = math.pi
+
+	local function GetModelDimensions(Round)
+		local ModelPath = (not Round.IgnoreRackModel and Round.RackModel) or Round.Model
+
+		-- Use ActualLength and ActualWidth if provided
+		if Round.ActualLength and Round.ActualWidth then
+			local ModelData = ACF.ModelData.GetModelData(ModelPath)
+			local Offset    = ModelData and ModelData.Center and Vector(-ModelData.Center.x, 0, 0) or Vector()
+
+			return Round.ActualLength, Round.ActualWidth, ModelPath, Offset
+		end
+
+		-- Use the dimensions of the actual model otherwise
+		local ModelData = ACF.ModelData.GetModelData(ModelPath)
+
+		if not ModelData or not ModelData.Size then
+			return nil
+		end
+
+		local Size     = ModelData.Size
+		local Center   = ModelData.Center
+		local Length   = Size.x
+		local Diameter = max(Size.y, Size.z)
+		local Offset   = Vector(-Center.x, 0, 0)
+
+		return Length, Diameter, ModelPath, Offset
 	end
 
-	local function GetRoundsPerAxis(SizeX, SizeY, SizeZ, Length, Width, Height, Spacing, IsBelted)
-		-- Omitting spacing for the axises with just one round
-		local AlteredSpacing = IsBelted and 0 or Spacing
-		if math.floor(SizeX / Length) > 1 then Length = Length + AlteredSpacing end
-		if math.floor(SizeY / Width) > 1 then Width = Width + AlteredSpacing end
-		if math.floor(SizeZ / Height) > 1 then Height = Height + AlteredSpacing end
+	ACF.GetModelDimensions = GetModelDimensions
 
-		local RoundsX = math.floor(SizeX / Length)
-		local RoundsY = math.floor(SizeY / Width)
-		local RoundsZ = math.floor(SizeZ / Height)
+	local function GetRoundProperties(Class, ToolData, BulletData)
+		local Weapon  = Class.Lookup and Class.Lookup[ToolData.Weapon]
+		local Caliber = Weapon and Weapon.Caliber or ToolData.Caliber
+		local Round   = Weapon and Weapon.Round or Class.Round
+		local Length, Diameter = GetModelDimensions(Round)
 
-		return RoundsX, RoundsY, RoundsZ
+		if Length then
+			return Vector(Length, Diameter, Diameter)
+		end
+
+		Diameter = Caliber * ACF.AmmoCaseScale * MM_TO_CM
+		Length   = BulletData.PropLength + BulletData.ProjLength
+
+		return Vector(Length, Diameter, Diameter) / ACF.InchToCm
 	end
 
-	-- Split this off from the original function,
-	-- All this does is compare a distance against a table of distances with string indexes for the shortest fitting size
-	-- It returns the string index of the dimension, or nil if it fails to fit
-	local function ShortestSize(Length, Width, Height, Spacing, Dimensions, ExtraData, IsIrregular)
-		local BestCount = 0
-		local BestAxis
+	ACF.GetRoundProperties = GetRoundProperties
 
-		for Axis in pairs(Axises) do
-			local X, Y, Z = GetBoxDimensions(Axis, Dimensions)
-			local Multiplier = 1
+	do -- MARK: Box Ammo Crate Functions
 
-			if not IsIrregular then
-				local MagSize = ExtraData.MagSize
+		-- Returns true if hex packing uses less space than square packing
+		local function ShouldUseHexPacking(countY, countZ)
+			if countY <= 1 or countZ <= 1 then return false end
 
-				if MagSize and MagSize > 0 then
-					Multiplier = MagSize
-				end
-			end
+			local squareArea = countY * countZ
+			local hexArea    = ((countY - 1) * HEX_SPACING + 1) * (countZ + HEX_OFFSET)
 
-			local RoundsX, RoundsY, RoundsZ = GetRoundsPerAxis(X, Y, Z, Length, Width, Height, Spacing, ExtraData.IsBelted)
-			local Count = RoundsX * RoundsY * RoundsZ * Multiplier
-
-			if Count > BestCount then
-				BestAxis = Axis
-				BestCount = Count
-			end
+			return hexArea < squareArea
 		end
 
-		return BestAxis, BestCount
+		-- Hex packing given a count and round size
+		local function HexDimY(count, size) return (count - 1) * size * HEX_SPACING + size end
+		local function HexDimZ(count, size) return count * size + size * HEX_OFFSET end
+
+		-- Inverse: how many fit in a given dimension
+		local function HexCountY(dim, size) return floor((dim - size) / (size * HEX_SPACING) + 1) end
+		local function HexCountZ(dim, size) return floor((dim - size * HEX_OFFSET) / size) end
+
+		function ACF.GetCrateDimensions(arrangement, roundSize)
+			if ShouldUseHexPacking(arrangement.y, arrangement.z) then
+				local dimensions = Vector(
+					arrangement.x * roundSize.x,
+					HexDimY(arrangement.y, roundSize.y),
+					HexDimZ(arrangement.z, roundSize.z)
+				)
+
+				return dimensions, true
+			end
+
+			return Vector(arrangement.x, arrangement.y, arrangement.z) * roundSize, false
+		end
+
+		function ACF.GetRoundOffset(x, y, z, roundSize, arrangement)
+			local localX = (x - 1) * roundSize.x
+
+			if ShouldUseHexPacking(arrangement.y, arrangement.z) then
+				return Vector(
+					localX,
+					(y - 1) * roundSize.y * HEX_SPACING,
+					(z - 1) * roundSize.z + ((y - 1) % 2) * roundSize.z * HEX_OFFSET
+				)
+			end
+
+			return Vector(localX, (y - 1) * roundSize.y, (z - 1) * roundSize.z)
+		end
+
+		function ACF.GetCrateSizeFromProjectileCounts(CountX, CountY, CountZ, Class, ToolData, BulletData)
+			local roundSize = GetRoundProperties(Class, ToolData, BulletData)
+
+			return ACF.GetCrateDimensions(Vector(CountX, CountY, CountZ), roundSize)
+		end
+
+		function ACF.GetMaxCounts(roundSize, maxLength, maxWidth, currentY, currentZ)
+			local maxX       = max(1, floor(maxLength / roundSize.x))
+			local maxYSquare = floor(maxWidth / roundSize.y)
+			local maxZSquare = floor(maxWidth / roundSize.z)
+			local maxYHex    = HexCountY(maxWidth, roundSize.y)
+			local maxZHex    = HexCountZ(maxWidth, roundSize.z)
+
+			local maxY = ShouldUseHexPacking(maxYHex, currentZ) and maxYHex or maxYSquare
+			local maxZ = ShouldUseHexPacking(currentY, maxZHex) and maxZHex or maxZSquare
+
+			return maxX, max(1, maxY), max(1, maxZ)
+		end
+
+		function ACF.GetProjectileCountsFromCrateSize(Size, Class, ToolData, BulletData)
+			local roundSize = GetRoundProperties(Class, ToolData, BulletData)
+			local countX    = max(1, floor(Size.x / roundSize.x))
+			local sqY       = floor(Size.y / roundSize.y)
+			local sqZ       = floor(Size.z / roundSize.z)
+			local hexY      = HexCountY(Size.y, roundSize.y)
+			local hexZ      = HexCountZ(Size.z, roundSize.z)
+
+			if ShouldUseHexPacking(hexY, hexZ) then
+				return countX, max(1, hexY), max(1, hexZ)
+			end
+
+			return countX, max(1, sqY), max(1, sqZ)
+		end
 	end
 
-	-- Made by LiddulBOFH :)
-	function ACF.GetAmmoCrateCapacity(Size, WeaponClass, ToolData, BulletData)
-		if BulletData.Type == "Refill" then -- Gives a nice number of rounds per refill box
-			return math.ceil(Size.x * Size.y * Size.z * 0.01)
+	do -- MARK: Drums
+		---------------------------------------------------------------------------
+		-- Drum geometry:
+		-- - Rounds are arranged in rings around a central axis (the drum's Z axis)
+		-- - Each round points INWARD with its tip toward the center
+		-- - roundSize: x = length, y = diameter, z = diameter (rounds are cylindrical)
+		-- - The inner radius is where round tips meet
+		-- - The outer radius is innerRadius + roundLength
+		-- - Layers are stacked along Z with hexagonal offset for efficient packing
+		---------------------------------------------------------------------------
+
+		local MIN_ROUNDS_PER_RING = 6
+
+		-- Calculate inner radius from rounds per ring and round diameter
+		local function GetInnerRadius(roundsPerRing, roundDiameter)
+			return (roundsPerRing * roundDiameter) / (2 * pi)
 		end
 
-		local Weapon    = WeaponClass.Lookup[ToolData.Weapon]
-		local Caliber   = Weapon and Weapon.Caliber or ToolData.Caliber
-		local Round     = Weapon and Weapon.Round or WeaponClass.Round
-		local Width     = Caliber * ACF.AmmoCaseScale * 0.1 -- mm to cm
-		local Length    = BulletData.PropLength + BulletData.ProjLength + BulletData.Tracer
-		local MagSize   = math.floor(ACF.GetWeaponValue("MagSize", Caliber, WeaponClass, Weapon) or 1)
-		local Spacing   = math.max(0, ToolData.AmmoPadding or ACF.AmmoPadding) * Width * 0.1 + 0.125
-		local IsBoxed   = WeaponClass.IsBoxed
-		local BeltFed 	= ACF.GetWeaponValue("IsBelted", Caliber, WeaponClass, Weapon) or false
-		local Rounds    = 0
-		local ExtraData = {}
-		local BoxSize, Height, Rotate
+		-- Calculate drum height from layers and round diameter
+		local function GetDrumHeight(numLayers, roundDiameter)
+			if numLayers <= 1 then return roundDiameter end
 
-		-- Weapons are able to define the size of their ammo inside crates
-		if Round.ActualWidth then
-			local Scale = Weapon and 1 or Caliber / Class.Caliber.Base
-
-			Width  = Round.ActualWidth * Scale -- This was made before the big measurement change throughout, where I measured shit in actual source units
-			Length = Round.ActualLength * Scale -- as such, this corrects all missiles to the correct size
-
-			ExtraData.IsRacked = true
+			return roundDiameter + (numLayers - 1) * roundDiameter * HEX_SPACING
 		end
 
-		do -- Defining the actual boxsize
-			local Armor = math.max(0, ToolData.AmmoArmor or ACF.AmmoArmor) * ACF.MmToInch * 2
-			local X     = math.max(Size.x - Armor, 0)
-			local Y     = math.max(Size.y - Armor, 0)
-			local Z     = math.max(Size.z - Armor, 0)
-
-			BoxSize = Vector(X, Y, Z)
+		--- Returns the minimum rounds per ring for drum geometry
+		function ACF.GetMinRoundsPerRing()
+			return MIN_ROUNDS_PER_RING
 		end
 
-		do -- Converting everything to source units
-			Length = Length * 0.3937 -- cm to in
-			Width  = Width * 0.3937 -- cm to in
-			Height = Width
+		function ACF.GetMaxRoundsPerRing(roundSize, maxDiameter)
+			local availableForInner = maxDiameter - 2 * roundSize.x
+
+			if availableForInner <= 0 then return MIN_ROUNDS_PER_RING end
+
+			local maxRounds = floor(availableForInner * pi / roundSize.y)
+
+			return max(MIN_ROUNDS_PER_RING, maxRounds)
 		end
 
-		ExtraData.Spacing = Spacing
+		function ACF.GetMaxDrumLayers(roundSize, maxHeight)
+			local roundDiameter = roundSize.y
 
-		-- This block alters how ammo is stored
-		-- If the weapon is supposed to be beltfed, then it removes the lateral spacing between rounds (because its on a belt)
-		-- Otherwise, it converts the rounds into "boxes" of rounds and spaces between those, and each box represents one magazine
-		if BeltFed then
-			MagSize = 1
-			ExtraData.IsBelted = true
-		elseif MagSize > 1 then
-			if IsBoxed and not ExtraData.IsRacked then
-				-- Makes certain automatic ammo stored by boxes
-				Width = Width * math.sqrt(MagSize)
-				Height = Width
+			if maxHeight < roundDiameter then return 1 end
 
-				ExtraData.MagSize = MagSize
-				ExtraData.IsBoxed = true
-			else
-				MagSize = 1
-			end
+			return max(1, floor((maxHeight - roundDiameter) / (roundDiameter * HEX_SPACING) + 1))
 		end
 
-		local ShortestFit = ShortestSize(Length, Width, Height, Spacing, BoxSize, ExtraData)
+		function ACF.GetDrumDimensions(roundsPerRing, numLayers, roundSize)
+			local roundDiameter = roundSize.y
+			local innerRadius   = GetInnerRadius(roundsPerRing, roundDiameter)
+			local drumDiameter  = (innerRadius + roundSize.x) * 2
 
-		-- If ShortestFit is nil, that means the round isn't able to fit at all in the box
-		-- If its a racked munition that doesn't fit, it will go ahead and try to fit 2-pice
-		-- Otherwise, checks if the caliber is over 100mm before trying 2-piece ammunition
-		-- It will flatout not do anything if its boxed and not fitting
-		if not ShortestFit and not ExtraData.IsBoxed and (ExtraData.IsRacked or Caliber >= 100) then
-			Length = Length * 0.5 -- Not exactly accurate, but cuts the round in two
-			Width = Width * 2 -- two pieces wide
-
-			ExtraData.IsTwoPiece = true
-
-			local ShortestFit1, Count1 = ShortestSize(Length, Width, Height, Spacing, BoxSize, ExtraData, true)
-			local ShortestFit2, Count2 = ShortestSize(Length, Height, Width, Spacing, BoxSize, ExtraData, true)
-
-			Rotate      = Count1 <= Count2
-			ShortestFit = Either(Rotate, ShortestFit2, ShortestFit1) -- ShortestFitX values could be nil, a ternary won't work here
+			return Vector(drumDiameter, drumDiameter, GetDrumHeight(numLayers, roundDiameter))
 		end
 
-		-- If it still doesn't fit the box, then it's just too small
-		if ShortestFit then
-			local SizeX, SizeY, SizeZ, LocalAng = GetBoxDimensions(ShortestFit, BoxSize)
+		function ACF.GetDrumRoundOffset(index, roundsPerRing, numLayers, roundSize)
+			local roundLength   = roundSize.x
+			local roundDiameter = roundSize.y
 
-			ExtraData.LocalAng = LocalAng
-			ExtraData.RoundSize = Vector(Length, Width, Height)
+			local ringIndex  = (index - 1) % roundsPerRing
+			local layerIndex = floor((index - 1) / roundsPerRing)
 
-			-- In case the round was cut and needs to be rotated, then we do some minor changes
-			if Rotate then
-				SizeY, SizeZ = SizeZ, SizeY -- Interchanging the values
+			local innerRadius    = GetInnerRadius(roundsPerRing, roundDiameter)
+			local positionRadius = innerRadius + roundLength / 2
 
-				ExtraData.LocalAng = ExtraData.LocalAng + Angle(0, 0, 90)
+			-- Base angle with hex offset for alternating layers
+			local baseAngle = (ringIndex / roundsPerRing) * 360
+			local angle     = baseAngle + (layerIndex % 2 == 1 and 180 / roundsPerRing or 0)
+
+			-- XY position (drum axis is Z)
+			local angleRad = rad(angle)
+			local x        = cos(angleRad) * positionRadius
+			local y        = sin(angleRad) * positionRadius
+
+			-- Z position
+			local z = 0
+
+			if numLayers > 1 then
+				local drumHeight = GetDrumHeight(numLayers, roundDiameter)
+				z = -drumHeight / 2 + roundDiameter / 2 + layerIndex * roundDiameter * HEX_SPACING
 			end
 
-			local RoundsX, RoundsY, RoundsZ = GetRoundsPerAxis(SizeX, SizeY, SizeZ, Length, Width, Height, Spacing, ExtraData.IsBelted)
-
-			ExtraData.FitPerAxis = Vector(RoundsX, RoundsY, RoundsZ)
-
-			Rounds = RoundsX * RoundsY * RoundsZ * MagSize
+			-- Round points inward: yaw = angle + 180
+			return Vector(x, y, z), Angle(0, angle + 180, 0)
 		end
 
-		return Rounds, ExtraData
+
+		function ACF.GetDrumCrateSizeFromProjectileCounts(roundsPerRing, numLayers, Class, ToolData, BulletData)
+			local roundSize = GetRoundProperties(Class, ToolData, BulletData)
+
+			return ACF.GetDrumDimensions(roundsPerRing, numLayers, roundSize)
+		end
 	end
 end

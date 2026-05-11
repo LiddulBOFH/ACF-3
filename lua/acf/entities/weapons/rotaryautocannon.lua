@@ -38,26 +38,12 @@ Weapons.Register("RAC", {
 		Min = 10,
 		Max = 20,
 	},
-})
-
-Weapons.RegisterItem("14.5mmRAC", "RAC", {
-	Caliber = 14.5,
-})
-
-Weapons.RegisterItem("20mmRAC", "RAC", {
-	Caliber = 20,
-})
-
-Weapons.RegisterItem("30mmRAC", "RAC", {
-	Caliber = 30,
-})
-
-Weapons.RegisterItem("20mmHRAC", "RAC", {
-	Caliber = 20,
-})
-
-Weapons.RegisterItem("30mmHRAC", "RAC", {
-	Caliber = 30,
+	LimitConVar = {
+		Name = "_acf_rotaryautocannon",
+		Amount = 2,
+		Text = "Maximum amount of ACF rotary auto cannons a player can create."
+	},
+	CostScalar	= 1.75
 })
 
 ACF.SetCustomAttachment("models/rotarycannon/kw/20mmrac.mdl", "muzzle", Vector(59.6, 0, 1.74))

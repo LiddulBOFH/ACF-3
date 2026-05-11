@@ -3,6 +3,7 @@
 -- A lot of this code has been optimized/profiled, but there's more work to do in that department...
 
 local ACF = ACF
+local Notify = ACF.Utilities.Notify
 
 if ACF.Scanning and ACF.Scanning.ClearPanels and CLIENT then
     ACF.Scanning.ClearPanels()
@@ -11,7 +12,6 @@ end
 local scanning = {}
 ACF.Scanning = scanning
 
-local net_ReadBool = net.ReadBool
 local net_ReadEntity = net.ReadEntity
 local net_ReadString = net.ReadString
 local net_ReadUInt = net.ReadUInt
@@ -20,7 +20,6 @@ local net_Send = net.Send
 local net_Broadcast = net.Broadcast
 local net_SendToServer = net.SendToServer
 local net_Start = net.Start
-local net_WriteBool = net.WriteBool
 local net_WriteEntity = net.WriteEntity
 local net_WriteString = net.WriteString
 local net_WriteUInt = net.WriteUInt
@@ -84,12 +83,11 @@ local function readEntityPacket()
 
     return ent, mi, ma, ents, nodrawEnts
 end
-local function writeAmmoFuelPacket(ent, isRefill)
+local function writeAmmoFuelPacket(ent)
     net_WriteEntity(ent)
-    net_WriteBool(isRefill)
 end
 local function readAmmoFuelPacket()
-    return net_ReadEntity(), net_ReadBool()
+    return net_ReadEntity()
 end
 
 local scannerTypes = {}
@@ -127,28 +125,35 @@ end
 --local unknowntype   = DefineScannerType(nil, "Unknown",        Color(255, 255, 255), "?",  {})
 local baseplateC    = DefineScannerType(nil, "Baseplate",      Color(255, 150, 255), "BP", {})
 local playerC       = DefineScannerType(nil, "Player",         Color(150, 200, 200), "PL", {})
+DefineScannerType("prop_vehicle_prisoner_pod", "Seat/Pod",                Color(130, 255, 100), "P",   {drawModelOverlay = true})
 
 DefineScannerType("acf_gun",                   "ACF Gun",                 Color(100, 130, 255), "G",   {drawModelOverlay = true})
 DefineScannerType("acf_ammo",                  "ACF Ammo Crate",          Color(255, 50, 35),   "A",   {drawBounds = true, drawMarker = true})
-local ammoRefill = DefineScannerType(nil,      "ACF Ammo Refill",         Color(255, 50, 35),   "AR",  {drawBounds = true, drawMarker = true})
 
 DefineScannerType("acf_rack",                  "ACF Missile Rack",        Color(100, 230, 255), "RK",  {drawModelOverlay = true})
 DefineScannerType("acf_radar",                 "ACF Radar",               Color(255, 200, 50),  "R",   {drawModelOverlay = true})
-DefineScannerType("prop_vehicle_prisoner_pod", "Seat/Pod",                Color(130, 255, 100), "P",   {drawModelOverlay = true})
 
 DefineScannerType("acf_engine",                "ACF Engine",              Color(200, 255, 100), "E",   {drawModelOverlay = true})
 DefineScannerType("acf_gearbox",               "ACF Gearbox",             Color(148, 148, 20),  "GB",  {drawModelOverlay = true, drawOverlay = true})
 DefineScannerType("acf_fueltank",              "ACF Fueltank",            Color(200, 180, 230), "F",   {drawBounds = true})
-local fuelRefill = DefineScannerType(nil,      "ACF Fueltank Refill",     Color(200, 180, 230), "FR",  {drawBounds = true})
 
 DefineScannerType("acf_piledriver",            "ACF Piledriver",          Color(255, 100, 90),  "PD",  {})
 DefineScannerType("acf_computer",              "ACF Computer",            Color(235, 235, 255), "E",   {drawModelOverlay = true})
-DefineScannerType("acf_armor",                 "ACF Armor",               Color(235, 235, 255), "PAR", {})
 
 DefineScannerType("acf_turret",                "ACF Turret",              Color(155, 215, 255), "T",   {drawModelOverlay = true, drawMesh = true})
 DefineScannerType("acf_turret_motor",          "ACF Turret Motor",        Color(155, 215, 255), "TM",  {drawModelOverlay = true, drawMesh = true})
 DefineScannerType("acf_turret_gyro",           "ACF Turret Gyroscope",    Color(155, 215, 255), "TG",  {drawModelOverlay = true, drawMesh = true})
 DefineScannerType("acf_turret_computer",       "ACF Turret Computer",     Color(155, 215, 255), "TC",  {drawModelOverlay = true, drawMesh = true})
+
+DefineScannerType("acf_baseplate",             "ACF Baseplate",           Color(255, 65, 160),  "ABP", {drawBounds = true, drawMarker = true})
+DefineScannerType("acf_crew",                  "ACF Crew Member",         Color(211, 33, 196),  "CR",  {drawModelOverlay = true})
+DefineScannerType("acf_controller",            "ACF Controller",          Color(156, 0, 177),   "CON", {drawModelOverlay = true})
+
+DefineScannerType("acf_supply",                "ACF Supply Crate",        Color(255, 171, 164), "SC",  {drawModelOverlay = true})
+DefineScannerType("acf_waterjet",              "ACF Waterjet",            Color(160, 236, 255), "WJ",  {drawModelOverlay = true})
+DefineScannerType("acf_autoloader",            "ACF Autoloader",          Color(168, 39, 27),   "AL",  {drawModelOverlay = true})
+DefineScannerType("acf_receiver",              "ACF Warning Receiver",    Color(241, 255, 164), "WR",  {drawModelOverlay = true})
+DefineScannerType("acf_groundloader",          "ACF Ground Loader",       Color(255, 166, 0),   "GL",  {})
 
 DefineScannerType("gmod_wire_expression2",     "Expression 2 Chip",       Color(230, 40, 40),   "E2",  {})
 DefineScannerType("starfall_processor",        "Starfall Chip",           Color(100, 140, 230), "SF",  {})
@@ -159,10 +164,6 @@ DefineScannerType("primitive_staircase",       "Primitive Staircase",     Color(
 DefineScannerType("primitive_ladder",          "Primitive Ladder",        Color(200, 200, 255), "PRl", {drawMesh = true})
 DefineScannerType("primitive_rail_slider",     "Primitive Rail Slider",   Color(200, 200, 255), "PRr", {drawMesh = true})
 DefineScannerType("primitive_airfoil",         "Primitive Airfoil",       Color(200, 200, 255), "PRa", {drawMesh = true})
-
-DefineScannerType("acf_baseplate",             "ACF Baseplate",           Color(255, 65, 160),  "ABP", {drawBounds = true, drawMarker = true})
-DefineScannerType("acf_crew",                  "ACF Crew Member",         Color(211, 33, 196),  "CR",  {drawModelOverlay = true})
-DefineScannerType("acf_controller",            "ACF Controller",          Color(156, 0, 177),   "CON", {drawModelOverlay = true})
 
 local function NetStart(n)
     net_Start("ACF_Scanning_NetworkPacket")
@@ -238,7 +239,7 @@ if SERVER then
                         msg = "ACF damage is currently blocked due to recent use of the contraption scanner. Please try again in " .. math.Round(scanner_damageCooldown - (now - started), 2) .. " seconds."
                     end
 
-                    ACF.SendNotify(owner, false, msg)
+                    Notify.WarningToPlayer(owner, msg)
                 end
                 scanner_acfDamage_notifiedThisTick[owner] = true
                 return false
@@ -350,7 +351,7 @@ if SERVER then
                             elseif class == "acf_fueltank" then
                                 fuelTanks[#fuelTanks + 1] = ent
                             end
-                            local contraption = ent:GetContraption()
+                            local contraption = ent:CFW_GetContraption()
                             if contraption == nil then
                                 noContraption[#noContraption + 1] = ent
                             else
@@ -399,17 +400,19 @@ if SERVER then
                             end
 
                             writeEntityPacket(selectedAncestor, mi, ma, v, nil)
+                        else
+                            writeEntityPacket(NULL, nil, nil, noContraption, nodrawEnts)
                         end
                     end
 
                     net_WriteUInt(#ammoCrates, MAX_EDICT_BITS)
                     for _, v in ipairs(ammoCrates) do
-                        writeAmmoFuelPacket(v, v.AmmoType == "Refill")
+                        writeAmmoFuelPacket(v)
                     end
 
                     net_WriteUInt(#fuelTanks, MAX_EDICT_BITS)
                     for _, v in ipairs(fuelTanks) do
-                        writeAmmoFuelPacket(v, v.SupplyFuel == true)
+                        writeAmmoFuelPacket(v)
                     end
 
                     net_Send(kPlayer)
@@ -618,7 +621,14 @@ if CLIENT then
         end
     end)
 
+    local scanningEnts = {}
+    local baseplates = {}
+    local SelectedFilter = {}
+    local markerSizeW, markerSizeH = 39, 28
+
     RegisterBasePanelDerivative("TabSelector", function(PANEL, _)
+        local margin = 4
+
         function PANEL:Init()
             self.Buttons = {}
             self.Tabs = {}
@@ -638,7 +648,9 @@ if CLIENT then
             closeButton:DrawBackgroundWhenNotHovered(false)
             closeButton:SetText("X")
             self.closeButton = closeButton
+            self.ButtonWidth = closeButton:GetWide()
         end
+
         function PANEL:AddTab(labelTxt)
             local tabSelector = self:Add("ACF_Scanner_BaseButton")
 
@@ -648,13 +660,15 @@ if CLIENT then
 
             local tab = vgui.Create("ACF_Scanner_BasePanel")
             tab:SetTall(256)
+
             local tabSelectorPaint = tabSelector.Paint
             local t = self
+
             function tabSelector:Paint(w, h)
                 tabSelectorPaint(self, w, h)
                 if t.selectedTab == tab then
                     surface.SetDrawColor(200, 220, 255)
-                    surface.DrawRect(4, h - 4, w - 8, 2)
+                    surface.DrawRect(margin, h - margin, w - (margin * 2), 2)
                 end
             end
 
@@ -664,35 +678,126 @@ if CLIENT then
 
             self.Buttons[#self.Buttons + 1] = tabSelector
             self.Tabs[#self.Tabs + 1] = tab
+            tab.MarkerLines = {}
+
+            surface.SetFont("ACF_Scanner_Font1")
+            local tX = surface.GetTextSize(labelTxt)
+            tX = tX + (margin * 8)
+            self.ButtonWidth = self.ButtonWidth + tX
+            self:SetWide(self.ButtonWidth)
 
             tab:Hide()
 
             local realTabInside = tab:Add("DScrollPanel")
             realTabInside:Dock(FILL)
             realTabInside:DockMargin(8, 4, 8, 4)
+            realTabInside:DockPadding(8, 4, 8, 4)
 
             function tab:AddLabel(lblTxt)
                 local lbl = realTabInside:Add("DLabel")
                 lbl:Dock(TOP)
                 lbl:SetText(lblTxt)
                 lbl:SetFont("ACF_Scanner_Font2")
+
+                return lbl
+            end
+
+            local xOffset, yOffset = 0, 0
+            local MarkersPerLine = (realTabInside:GetWide() - (markerSizeW * 0.3)) / (markerSizeW * 0.3)
+
+            function tab:AddMarker(ScanDef)
+                local MarkerLine = self.MarkerLines[yOffset]
+
+                if not IsValid(MarkerLine) then
+                    MarkerLine = realTabInside:Add("ACF_Scanner_BasePanel")
+                    MarkerLine:Dock(TOP)
+                    MarkerLine:SetSize(realTabInside:GetWide(), markerSizeH * 1.5)
+                    self.MarkerLines[yOffset] = MarkerLine
+
+                    function MarkerLine:Paint() end
+                end
+
+                local MarkerButton = MarkerLine:Add("ACF_Scanner_BaseButton")
+                MarkerButton:SetText("")
+                MarkerButton:SetSize(markerSizeW * 1.5, markerSizeH * 1.5)
+                MarkerButton:Dock(LEFT)
+                MarkerButton:DrawBackgroundWhenNotHovered(false)
+                MarkerButton.ScanClass = ScanDef.class
+                MarkerButton.ScanNick = ScanDef.nickname
+                MarkerButton.FilterActive = false
+
+                function MarkerButton:Paint(W, H)
+                    local hV, dP = self.Hovered, self.Depressed or self.FilterActive
+                    local m = dP and 0.7 or hV and 4.6 or 1
+
+                    ACF.Scanning.DrawMarker(ScanDef, W / 2, H / 2)
+
+                    if self.drawBackgroundWhenNotHovered or m ~= 1 then
+                        surface.SetDrawColor(25 * m, 28 * m, 32 * m, 168)
+                        surface.DrawRect(0, 0, W, H)
+                        surface.SetDrawColor(176 * m, 185 * m, 200 * m, 225)
+                        surface.DrawOutlinedRect(0, 0, W, H, self.bSize)
+                    end
+                end
+
+                function MarkerButton:DoClick()
+                    local FilterActive = not self.FilterActive
+
+                    if self.ScanClass then
+                        for _, Ent in ipairs(scanningEnts) do
+                            if not IsValid(Ent) then continue end
+
+                            local Class = Ent:GetClass()
+                            if Class ~= self.ScanClass then continue end
+
+                            if FilterActive and not SelectedFilter[Ent] then
+                                SelectedFilter[Ent] = true
+                            elseif not FilterActive and SelectedFilter[Ent] then
+                                SelectedFilter[Ent] = nil
+                            end
+                        end
+                    else
+                        local EntGroup = self.ScanNick == "Player" and player.GetAll() or baseplates
+
+                        for _, Ent in ipairs(EntGroup) do
+                            if not IsValid(Ent) then continue end
+
+                            if FilterActive and not SelectedFilter[Ent] then
+                                SelectedFilter[Ent] = true
+                            elseif not FilterActive and SelectedFilter[Ent] then
+                                SelectedFilter[Ent] = nil
+                            end
+                        end
+                    end
+
+                    self.FilterActive = FilterActive
+                end
+
+                xOffset = xOffset + 1
+
+                if xOffset >= MarkersPerLine then
+                    yOffset = yOffset + 1
+                    xOffset = 0
+                end
+
+                return MarkerButton
             end
 
             function tab:PreserveScroll()
                 self._scroll = self:GetVBar():GetScroll()
             end
+
             function tab:RestoreScroll()
                 self:GetVBar():SetScroll(self._scroll or 0)
             end
+
             function tab:Clear()
                 for _, v in ipairs(realTabInside:GetChildren()) do
                     v:Remove()
                 end
             end
 
-            function realTabInside:Paint()
-
-            end
+            function realTabInside:Paint() end
 
             function tab:Add(type)
                 return realTabInside:Add(type)
@@ -700,28 +805,30 @@ if CLIENT then
 
             return tab, tabSelector
         end
+
         function PANEL:SelectTab(tab)
             for _, v in ipairs(self.Tabs) do
                 v:Hide()
             end
+
             if IsValid(tab) then
                 tab:Show()
             end
+
             self.selectedTab = tab
         end
+
         function PANEL:PerformLayout(w, h)
-            local scrW, _ = ScrW(), ScrH()
-
-            self:SetPos(scrW - w - 16 - 256, 8)
-
-            local margin = 4
+            local scrW = ScrW()
             local size = 0
+
+            self:SetPos(scrW - w - 16 - 256, 12)
 
             for _, v in ipairs(self.Buttons) do
                 v:SetPos(margin + size, margin)
 
                 surface.SetFont("ACF_Scanner_Font1")
-                local tX, _ = surface.GetTextSize(v:GetText())
+                local tX = surface.GetTextSize(v:GetText())
                 tX = tX + (margin * 6)
                 v:SetSize(tX, h - (margin * 2))
                 size = size + tX + margin
@@ -760,8 +867,28 @@ if CLIENT then
             if self.GetScrollSpeed then
                 local sp = self:GetScrollSpeed()
                 draw_SimpleTextRGBA("Speed [Mouse Scroll]: " .. sp .. " su/s", "ACF_Scanner_Font2", w / 2, h / 2, 255, 255, 255, 255, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM)
-                draw_SimpleTextRGBA("Press [C] to release the mouse pointer", "ACF_Scanner_Font3", w / 2, h / 2, 255, 255, 255, 255, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
+                draw_SimpleTextRGBA("Hold [C] to release the mouse pointer", "ACF_Scanner_Font3", w / 2, h / 2, 255, 255, 255, 255, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP)
             end
+        end
+    end)
+
+    RegisterBasePanelDerivative("Occlusion", function(PANEL, BASE)
+        function PANEL:Init()
+            self.Buttons = {}
+            self.Tabs = {}
+            self:SetSize(256 - 8, 48)
+        end
+
+        function PANEL:PerformLayout(w, _)
+            local scrW = ScrW()
+
+            self:SetPos(scrW - w - 12, 8 + 192 + 8 + 48 + 8)
+        end
+
+        function PANEL:Paint(w, h)
+            BASE.Paint(self, w, h)
+
+            draw_SimpleTextRGBA("Press [F] to hide aimed at entity", "ACF_Scanner_Font3", w / 2, h / 2, 255, 255, 255, 255, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
         end
     end)
 
@@ -770,7 +897,7 @@ if CLIENT then
             local internal = self:Add("DPanel")
             internal:Dock(FILL)
             function internal:Paint(w, h)
-                ACF.Scanning.DrawLegend(0, 0, w, h)
+                ACF.Scanning.DrawLegend(8, 8, w, h)
             end
 
             self:SetSizable(true)
@@ -788,8 +915,6 @@ if CLIENT then
 
     local scanningPlayer = nil
     --local specificEntity = nil -- Not yet used
-    local scanningEnts = {}
-    local baseplates = {}
     local contraptions = {}
     local posOffset = Vector(-35, 0, 70)
     local angOffset = Angle(0, 0, 0)
@@ -797,6 +922,8 @@ if CLIENT then
     local lastCalc = CurTime()
 
     local ammoCrateLookup, fuelTankLookup = {}, {}
+
+    local SelectedEntity = nil
 
     -- Support for multiple clipping methods
     -- Taken from Starfall and slightly optimized
@@ -906,7 +1033,7 @@ if CLIENT then
                 return
             end
             legend = scanning.AddPanel("ACF_Scanner_Legend")
-            legend:SetSize(512, 600)
+            legend:SetSize(512, 700)
             legend:Center()
             legend:SetX(legend:GetX() + (ScrW() / 2) - (legend:GetWide() / 2) - 8)
         end
@@ -918,14 +1045,18 @@ if CLIENT then
         local selector = tabSelector:AddTab("Select")
         selector:AddLabel(#contraptions .. " contraptions available to select.")
 
-        local filter   = tabSelector:AddTab("Filter") filter:AddLabel("WIP")
+        local filter   = tabSelector:AddTab("Filter")
+        for _, scanDef in ipairs(scannerTypesSeq) do
+            filter:AddMarker(scanDef)
+        end
+        --[[
         local weaponry = tabSelector:AddTab("Weaponry") weaponry:AddLabel("WIP")
         local mobility = tabSelector:AddTab("Mobility") mobility:AddLabel("WIP")
         local chips    = tabSelector:AddTab("Chips") chips:AddLabel("WIP")
         local other    = tabSelector:AddTab("Other") other:AddLabel("WIP")
-
-
+        ]]
         local speedvis = scanning.AddPanel("ACF_Scanner_ScrollSpeed")
+        scanning.AddPanel("ACF_Scanner_Occlusion")
 
         function speedvis:GetScrollSpeed()
             return scanning.GetMouseZoom()
@@ -941,6 +1072,8 @@ if CLIENT then
             Derma_Message("Scanning has been blocked by the server: " .. (whyNot or "<no reason provided>"), "Scanning Blocked", "OK")
         return end
 
+        SelectedFilter = {}
+
         NetStart("UpdatePlayer")
         net_WriteEntity(target)
         net_SendToServer()
@@ -948,12 +1081,15 @@ if CLIENT then
         posOffset = Vector(-35, 0, 70)
         angOffset = EyeAngles()
         scanningPlayer = target
+        lastCalc = CurTime()
 
         scanning.BuildPanel()
     end
 
     function scanning.EndScanning()
         scanningPlayer = nil
+
+        SelectedFilter = {}
 
         NetStart("EndScanning")
         net_SendToServer()
@@ -995,15 +1131,15 @@ if CLIENT then
             contraptions[#contraptions + 1] = {baseplate = baseplate, baseplateMI = baseplateMI, baseplateMA = baseplateMA, ents = ents}
         end
 
-        local ammoCrateLen = net_ReadUInt(14)
+        local ammoCrateLen = net_ReadUInt(MAX_EDICT_BITS)
         for _ = 1, ammoCrateLen do
-            local ent, isRefill = readAmmoFuelPacket()
-            ammoCrateLookup[ent] = isRefill
+            local ent = readAmmoFuelPacket()
+            ammoCrateLookup[ent] = true
         end
-        local fuelTankLen = net_ReadUInt(14)
+        local fuelTankLen = net_ReadUInt(MAX_EDICT_BITS)
         for _ = 1, fuelTankLen do
-            local ent, isRefill = readAmmoFuelPacket()
-            fuelTankLookup[ent] = isRefill
+            local ent = readAmmoFuelPacket()
+            fuelTankLookup[ent] = true
         end
     end)
     NetReceive("ForceScanningEnd", function()
@@ -1068,26 +1204,25 @@ if CLIENT then
         }
     end)
 
-    hook.Add("PlayerBindPress", "ACF_Scanner_BlockInputs", function(_, bind, _, _)
-        if scanning.IsScannerActive() and (bind ~= "messagemode") then
-            return true
-        end
-    end)
+    hook.Add("PlayerBindPress", "ACF_Scanner_BlockInputs", function(_, bind, pressed, code)
+        local ScannerActive = scanning.IsScannerActive()
 
-    local screenClickerEnabledBecauseOfUs = false
-    hook.Add("PlayerButtonDown", "ACF_Scanner_BlockInputs", function(_, btn)
-        if scanning.IsScannerActive() then
-            if btn == KEY_C then
+        if code == KEY_C then
+            if pressed and ScannerActive then
                 screenClickerEnabledBecauseOfUs = true
                 gui.EnableScreenClicker(true)
+            elseif screenClickerEnabledBecauseOfUs then
+                gui.EnableScreenClicker(false)
+                screenClickerEnabledBecauseOfUs = false
             end
-            return true
         end
-    end)
-    hook.Add("PlayerButtonUp", "ACF_Scanner_BlockInputs", function(_, btn)
-        if btn == KEY_C and screenClickerEnabledBecauseOfUs then
-            gui.EnableScreenClicker(false)
-            screenClickerEnabledBecauseOfUs = false
+
+        if ScannerActive and (bind ~= "messagemode") then
+            if pressed and code == KEY_F and IsValid(SelectedEntity) then
+                SelectedFilter[SelectedEntity] = true
+            end
+
+            return true
         end
     end)
 
@@ -1183,7 +1318,7 @@ if CLIENT then
         m:SetAngles(ent:GetAngles())
         cam.PushModelMatrix(m)
 
-        -- This renders the physical mesh as a solid mass using stencils. 
+        -- This renders the physical mesh as a solid mass using stencils.
         -- The stencil operations are so it can render the physmesh with color as other methods didnt work for me.
         -- Basically just draws the model to a stencil mask and that model renders with the color given to this method
         render.SetStencilWriteMask(0xFF)
@@ -1322,7 +1457,7 @@ if CLIENT then
 
         if scanning.IsScannerActive() then
             for _, ent in ipairs(scanningEnts) do
-                if IsValid(ent) then
+                if IsValid(ent) and not SelectedFilter[ent] then
                     local class = ent:GetClass()
                     local scanDef = scannerTypes[class]
 
@@ -1346,7 +1481,7 @@ if CLIENT then
             end
 
             for _, ent in ipairs(baseplates) do
-                if IsValid(ent) then
+                if IsValid(ent) and not SelectedFilter[ent] then
                     if ent:GetClass() ~= "acf_baseplate" then
                         drawEntityNoOutline(ent, baseplateC.colorEntityInside)
                         drawPhysMesh(ent, baseplateC.color)
@@ -1395,7 +1530,6 @@ if CLIENT then
         [19] = "NPC Scripted"
     }
 
-    local markerSizeW, markerSizeH = 39, 28
     local cornerX = 2
     local cornerY = 2
     local corners = {
@@ -1445,6 +1579,8 @@ if CLIENT then
         surface.DrawRect(pX - md2W, pY - md2H, markerSizeW, markerSizeH)
         surface.SetDrawColor(scanDef.colorMarkerBorder)
         surface.DrawOutlinedRect(pX - md2W, pY - md2H, markerSizeW, markerSizeH, 2)
+
+        if ent == SelectedEntity then surface.DrawOutlinedRect(pX - md2W * 1.2, pY - md2H * 1.2, markerSizeW * 1.2, markerSizeH * 1.2, 2) end
 
         surface.SetDrawColor(0, 0, 0, 255)
         surface.DrawOutlinedRect((pX - md2W) - 1, (pY - md2H) - 1, markerSizeW + 2, markerSizeH + 2)
@@ -1507,23 +1643,29 @@ if CLIENT then
         end
     end
 
+    local CenterX, CenterY = ScrW() / 2, ScrH() / 2
     hook.Add("HUDPaint", "ACF_Scanner_Render2D", function()
+        local ClosestDistance = 999999
+        local ClosestEntity = nil
         if scanning.IsScannerActive() then
-            local pXY = (scanningPlayer:GetPos() + Vector(0, 0, scanningPlayer:InVehicle() and 0 or 30)):ToScreen()
-            DrawMarker(playerC, pXY.x, pXY.y)
+            if not SelectedFilter[scanningPlayer] then
+                local pXY = (scanningPlayer:GetPos() + Vector(0, 0, scanningPlayer:InVehicle() and 0 or 30)):ToScreen()
+                DrawMarker(playerC, pXY.x, pXY.y)
+            end
+
             for _, ent in ipairs(scanningEnts) do
-                if IsValid(ent) then
+                if IsValid(ent) and not SelectedFilter[ent] then
                     local class = ent:GetClass()
                     local scanDef = scannerTypes[class]
                     if scanDef ~= nil then
                         if scanDef.drawMarker then
-                            if class == "acf_ammo" and ammoCrateLookup[ent] then
-                                scanDef = ammoRefill
-                            elseif class == "acf_fueltank" and fuelTankLookup[ent] then
-                                scanDef = fuelRefill
-                            end
                             local pXY = ent:GetPos():ToScreen()
                             local pX, pY = pXY.x, pXY.y
+                            local Distance = Vector(pX - CenterX, pY - CenterY, 0):Length()
+                            if Distance < ClosestDistance then
+                                ClosestDistance = Distance
+                                ClosestEntity = ent
+                            end
                             DrawMarker(scanDef, pX, pY, ent)
                         end
                         if scanDef.drawOverlay then
@@ -1536,8 +1678,10 @@ if CLIENT then
                 end
             end
 
+            if IsValid(ClosestEntity) then SelectedEntity = ClosestEntity end
+
             for _, ent in ipairs(baseplates) do
-                if IsValid(ent) and ent:GetClass() ~= "acf_baseplate" then
+                if IsValid(ent) and not SelectedFilter[ent] and ent:GetClass() ~= "acf_baseplate" then
                     local pXY = ent:GetPos():ToScreen()
                     local pX, pY = pXY.x, pXY.y
                     DrawMarker(baseplateC, pX, pY, ent)

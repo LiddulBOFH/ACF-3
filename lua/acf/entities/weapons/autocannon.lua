@@ -42,22 +42,12 @@ Weapons.Register("AC", {
 		Min = 250,
 		Max = 150,
 	},
-})
-
-Weapons.RegisterItem("20mmAC", "AC", {
-	Caliber = 20,
-})
-
-Weapons.RegisterItem("30mmAC", "AC", {
-	Caliber = 30,
-})
-
-Weapons.RegisterItem("40mmAC", "AC", {
-	Caliber = 40,
-})
-
-Weapons.RegisterItem("50mmAC", "AC", {
-	Caliber = 50,
+	LimitConVar = {
+		Name = "_acf_autocannon",
+		Amount = 4,
+		Text = "Maximum amount of ACF auto cannons a player can create."
+	},
+	CostScalar	= 0.75
 })
 
 ACF.SetCustomAttachment("models/autocannon/autocannon_50mm.mdl", "muzzle", Vector(120), Angle(0, 0, 180))

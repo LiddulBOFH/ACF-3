@@ -1,6 +1,5 @@
 local ACF = ACF
 
---- Creates/recreates the menu for this tool
 function ACF.CreateSuspensionToolMenu(Panel)
     local Menu = ACF.InitMenuBase(Panel, "SuspensionToolMenu", "acf_reload_suspension_menu")
 
@@ -23,6 +22,11 @@ function ACF.CreateSuspensionToolMenu(Panel)
         RunConsoleCommand("acf_reload_suspension_menu")
     end
 
+    ACF.CreateSuspensionToolMenuHeadless(Menu)
+end
+
+--- Creates/recreates the menu for this tool
+function ACF.CreateSuspensionToolMenuHeadless(Menu)
     Menu:AddTitle("ACF Suspension Tool")
     Menu:AddLabel("This tool helps create constraints for basic drivetrains.")
     Menu:AddLabel("You can hover over any of these elements to see their description.")
@@ -38,6 +42,7 @@ function ACF.CreateSuspensionToolMenu(Panel)
 
     -- Spring related
     local SpringType = GeneralSettings:AddComboBox()
+    SpringType:SetName("Spring Type")
     SpringType:AddChoice("Spring Type: Rigid (None)", 1)
     SpringType:AddChoice("Spring Type: Hydraulic", 2)
     SpringType:AddChoice("Spring Type: Elastic", 3)
@@ -70,13 +75,13 @@ function ACF.CreateSuspensionToolMenu(Panel)
                 RelativeDampening:SetTooltip("The amount of energy the elastic loses proportional to the relative velocity of the two objects the elastic is attached to.")
             end
 
-            local SpringX = SpringGeneral:AddSlider("Spring X", -100, 100)
+            local SpringX = SpringGeneral:AddSlider("Spring X", -100, 100, 2)
             SpringX:SetConVar("acf_sus_tool_springx")
 
-            local SpringY = SpringGeneral:AddSlider("Spring Y", -100, 100)
+            local SpringY = SpringGeneral:AddSlider("Spring Y", -100, 100, 2)
             SpringY:SetConVar("acf_sus_tool_springy")
 
-            local SpringZ = SpringGeneral:AddSlider("Spring Z", -100, 100)
+            local SpringZ = SpringGeneral:AddSlider("Spring Z", -100, 100, 2)
             SpringZ:SetConVar("acf_sus_tool_springz")
 
             -- Arm related
@@ -91,16 +96,16 @@ function ACF.CreateSuspensionToolMenu(Panel)
 
             ArmType:ChooseOptionID(GetConVar("acf_sus_tool_armtype"):GetInt())
 
-            local ArmX = SpringGeneral:AddSlider("Arm X", -100, 100)
+            local ArmX = SpringGeneral:AddSlider("Arm X", -100, 100, 2)
             ArmX:SetConVar("acf_sus_tool_armx")
 
-            local ArmY = SpringGeneral:AddSlider("Arm Y", -100, 100)
+            local ArmY = SpringGeneral:AddSlider("Arm Y", -100, 100, 2)
             ArmY:SetConVar("acf_sus_tool_army")
 
-            local ArmZ = SpringGeneral:AddSlider("Arm Z", -100, 100)
+            local ArmZ = SpringGeneral:AddSlider("Arm Z", -100, 100, 2)
             ArmZ:SetConVar("acf_sus_tool_armz")
 
-            local LimiterLength = SpringGeneral:AddSlider("Limiter Length", 0, 100)
+            local LimiterLength = SpringGeneral:AddSlider("Limiter Length", 0, 100, 2)
             LimiterLength:SetConVar("acf_sus_tool_limiterlength")
             LimiterLength:SetTooltip("Limits the distance the wheel can move from its default position")
         end

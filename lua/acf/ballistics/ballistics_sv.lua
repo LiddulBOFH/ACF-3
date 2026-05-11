@@ -1,15 +1,18 @@
-local hook       = hook
-local ACF        = ACF
-local Ballistics = ACF.Ballistics
-local Damage     = ACF.Damage
-local Clock      = ACF.Utilities.Clock
-local Effects    = ACF.Utilities.Effects
-local Debug		 = ACF.Debug
+local hook        = hook
+local ACF         = ACF
+local Ballistics  = ACF.Ballistics
+local Damage      = ACF.Damage
+local Clock       = ACF.Utilities.Clock
+local Effects     = ACF.Utilities.Effects
+local EventViewer = ACF.EventViewer
 
 Ballistics.Bullets         = Ballistics.Bullets or {}
 Ballistics.UnusedIndexes   = Ballistics.UnusedIndexes or {}
 Ballistics.HighestIndex    = Ballistics.HighestIndex or 0
 Ballistics.SkyboxGraceZone = 100
+
+local function GetEventViewerName(Idx) return "Ballistics - Bullet #" .. Idx end
+
 
 local Bullets      = Ballistics.Bullets
 local Unused       = Ballistics.UnusedIndexes
@@ -48,6 +51,9 @@ function Ballistics.RemoveBullet(Bullet)
 		Bullet:OnRemoved()
 	end
 
+	if EventViewer.Enabled() then
+		EventViewer.AppendEvent(GetEventViewerName(Index), "Ballistics.RemoveBullet")
+	end
 	Bullet.Removed = true
 
 	if not next(Bullets) then
@@ -58,7 +64,7 @@ end
 function Ballistics.CalcBulletFlight(Bullet)
 	local ClockTime = Clock.CurTime
 
-	if Bullet.KillTime and ClockTime > Bullet.KillTime then
+	if Bullet.KillTime and ClockTime >= Bullet.KillTime then
 		return Ballistics.RemoveBullet(Bullet)
 	end
 
@@ -73,6 +79,7 @@ function Ballistics.CalcBulletFlight(Bullet)
 	local Correction = 0.5 * (Accel - Drag) * DeltaTime
 
 	Bullet.NextPos   = Bullet.Pos + ACF.Scale * DeltaTime * (Flight + Correction)
+	Bullet.TraceTo   = Bullet.Pos + ACF.Scale * (DeltaTime * 2) * (Flight + Correction)
 	Bullet.Flight    = Flight + (Accel - Drag) * DeltaTime
 	Bullet.LastThink = ClockTime
 	Bullet.DeltaTime = DeltaTime
@@ -83,6 +90,7 @@ function Ballistics.CalcBulletFlight(Bullet)
 		Bullet:PostCalcFlight()
 	end
 
+	debugoverlay.Line(Bullet.Pos, Bullet.NextPos, 5, Bullet.Color)
 	Bullet.Pos = Bullet.NextPos
 end
 
@@ -111,6 +119,7 @@ function Ballistics.IterateBullets()
 		end
 	end
 end
+
 
 local RequiredBulletDataProperties = {"Pos", "Flight"}
 function Ballistics.CreateBullet(BulletData)
@@ -149,6 +158,12 @@ function Ballistics.CreateBullet(BulletData)
 		Bullet.Filter[#Bullet.Filter + 1] = Bullet.Owner:GetVehicle()
 	end
 
+	if EventViewer.Enabled() then
+		EventViewer.StartEvent(GetEventViewerName(Index))
+		-- Network the whole bullet state when event viewer is active.
+		EventViewer.AppendEvent(GetEventViewerName(Index), "Ballistics.CreateBullet", Bullet)
+	end
+
 	-- TODO: Make bullets use a metatable instead
 	function Bullet:GetPenetration()
 		local Ammo = AmmoTypes.Get(Bullet.Type)
@@ -170,7 +185,7 @@ end
 
 function Ballistics.GetImpactType(Trace, Entity)
 	if Trace.HitWorld then return "World" end
-	if Entity:IsPlayer() or Entity:IsNPC() then return "Prop" end
+	if Entity:IsPlayer() or Entity:IsNPC() or Entity:IsNextBot() then return "Prop" end
 
 	return IsValid(Entity:CPPIGetOwner()) and "Prop" or "World"
 end
@@ -186,6 +201,9 @@ function Ballistics.OnImpact(Bullet, Trace, Ammo, Type)
 
 		Ballistics.BulletClient(Bullet, "Update", 2, Trace.HitPos)
 		Ballistics.DoBulletsFlight(Bullet)
+		if EventViewer.Enabled() then
+			EventViewer.AppendEvent(GetEventViewerName(Bullet.Index), "Ballistics.OnImpact.Penetrated", Trace.StartPos, Trace.HitPos, Trace)
+		end
 	elseif Retry == "Ricochet" then
 		if Bullet.OnRicocheted then
 			Bullet.OnRicocheted(Bullet, Trace)
@@ -193,13 +211,18 @@ function Ballistics.OnImpact(Bullet, Trace, Ammo, Type)
 
 		Ballistics.BulletClient(Bullet, "Update", 3, Trace.HitPos)
 		Ballistics.DoBulletsFlight(Bullet)
+		if EventViewer.Enabled() then
+			EventViewer.AppendEvent(GetEventViewerName(Bullet.Index), "Ballistics.OnImpact.Ricochet", Trace.StartPos, Trace.HitPos, Trace)
+		end
 	else
 		if Bullet.OnEndFlight then
 			Bullet.OnEndFlight(Bullet, Trace)
 		end
 
 		Ballistics.BulletClient(Bullet, "Update", 1, Trace.HitPos)
-
+		if EventViewer.Enabled() then
+			EventViewer.AppendEvent(GetEventViewerName(Bullet.Index), "Ballistics.OnImpact.Unknown", Trace.StartPos, Trace.HitPos, Trace)
+		end
 		Ammo:OnFlightEnd(Bullet, Trace)
 	end
 end
@@ -213,11 +236,11 @@ function Ballistics.TestFilter(Entity, Bullet)
 
 	local EntTbl = Entity:GetTable()
 
-	if EntTbl._IsSpherical then return false end -- TODO: Remove when damage changes make props unable to be destroyed, as physical props can have friction reduced (good for wheels)
+	if ACF.FilterMakeSpherical and EntTbl._IsSpherical then return false end -- TODO: Remove when damage changes make props unable to be destroyed, as physical props can have friction reduced (good for wheels)
 	if EntTbl.ACF_InvisibleToBallistics then return false end
 	if EntTbl.ACF_KillableButIndestructible then
 		local EntACF = EntTbl.ACF
-	    if EntACF and EntACF.Health <= 0 then return false end
+		if EntACF and EntACF.Health <= 0 then return false end
 	end
 	if EntTbl.ACF_TestFilter then return EntTbl.ACF_TestFilter(Entity, Bullet) end
 
@@ -253,11 +276,9 @@ function Ballistics.DoBulletsFlight(Bullet)
 	FlightTr.mask 	= Bullet.Mask
 	FlightTr.filter = Bullet.Filter
 	FlightTr.start 	= Bullet.Pos
-	FlightTr.endpos = Bullet.NextPos
+	FlightTr.endpos = Bullet.TraceTo
 
 	local traceRes = ACF.trace(FlightTr) -- Does not modify the bullet's original filter
-
-	Debug.Line(Bullet.Pos, traceRes.HitPos, 30, Bullet.Color)
 
 	if Bullet.Fuze and Bullet.Fuze <= Clock.CurTime then
 		if not util.IsInWorld(Bullet.Pos) then -- Outside world, just delete
@@ -278,10 +299,18 @@ function Ballistics.DoBulletsFlight(Bullet)
 				Ballistics.BulletClient(Bullet, "Update", 1, Bullet.Pos)
 
 				AmmoTypes.Get(Bullet.Type):OnFlightEnd(Bullet, traceRes)
+				if EventViewer.Enabled() then
+					EventViewer.AppendEvent(GetEventViewerName(Bullet.Index), "Ballistics.DoBulletsFlight.Fuze")
+				end
 
 				return
 			end
 		end
+	end
+
+
+	if EventViewer.Enabled() then
+		EventViewer.AppendEvent(GetEventViewerName(Bullet.Index), "Ballistics.DoBulletsFlight", Bullet.Pos, Bullet.NextPos, FlightTr)
 	end
 
 	if traceRes.Hit then
@@ -344,8 +373,6 @@ do -- Terminal ballistics --------------------------
 		local HitRes   = Damage.dealDamage(Entity, DmgResult, DmgInfo)
 		local Ricochet = 0
 
-		Debug.Cross(Trace.HitPos, 6, 30, Bullet.Color, true)
-
 		if HitRes.Loss == 1 then
 			-- If the there's more armor than penetration, the bullet ricochets
 			Ricochet, HitRes.Loss = Ballistics.CalculateRicochet(Bullet, Trace)
@@ -383,6 +410,7 @@ do -- Terminal ballistics --------------------------
 			Bullet.Flight    = Flight
 			Bullet.Pos       = Position
 			Bullet.NextPos   = Position + Flight * Bullet.DeltaTime
+			Bullet.TraceTo   = Position + Flight * (Bullet.DeltaTime * 2)
 
 			HitRes.Ricochet = true
 		end
@@ -408,6 +436,7 @@ do -- Terminal ballistics --------------------------
 			Bullet.Flight      = Direction:GetNormalized() * Speed * ACF.Scale * Ricochet
 			Bullet.Pos         = Trace.HitPos
 			Bullet.NextPos     = Bullet.Pos + Bullet.Flight * DeltaTime
+			Bullet.TraceTo     = Bullet.Pos + Bullet.Flight * (DeltaTime * 2)
 
 			return "Ricochet"
 		end

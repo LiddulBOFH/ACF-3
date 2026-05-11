@@ -18,8 +18,8 @@ ACF.Tools = ACF.Tools or {}
 --- @field OpData Operation The data for the current operation
 --- @field Information table<number, ToolInfo>
 
---- Represents an entry in the tool information display for a given operation in a given stage of a given tool  
---- (see https://wiki.facepunch.com/gmod/Tool_Information_Display)  
+--- Represents an entry in the tool information display for a given operation in a given stage of a given tool
+--- (see https://wiki.facepunch.com/gmod/Tool_Information_Display)
 --- name text, icon1 and icon2 are the only things that actually end up displayed in the tool binds display
 --- PLEASE read the wiki page on name (the way it interacts with the icons is not intuitive)
 --- @class ToolInfo
@@ -31,7 +31,7 @@ ACF.Tools = ACF.Tools or {}
 --- @field stage number The index of the stage in the tool
 --- @field op number The index of the operation in the stage above
 
---- A table representing the data a tool can have.  
+--- A table representing the data a tool can have.
 --- Initialized in GetToolData
 --- @class ToolData
 --- @field Tool Tool|nil The tool this tooldata belongs to
@@ -70,7 +70,7 @@ ACF.Tools = ACF.Tools or {}
 --- @type table<string, ToolData>
 local Tools = ACF.Tools
 
---- Retrieves the tool data for a given tool.  
+--- Retrieves the tool data for a given tool.
 --- If the tool data doesn't already exist, it will initialize it.
 --- USE THIS TO INITIALIZE YOUR TOOL DATA.
 --- @param Tool string The name of the tool. (e.g. "acf_copy"/"acf_menu")
@@ -162,12 +162,12 @@ do -- Tool Stage/Operation Registration function
 end
 
 do -- Tool Information Registration function
-	--- This function will add entries to the tool's Information table  
-	--- This function is only intended to work on the client  
-	--- For more reference about the values you can give it see:  
-	--- https://wiki.facepunch.com/gmod/Tool_Information_Display  
+	--- This function will add entries to the tool's Information table
+	--- This function is only intended to work on the client
+	--- For more reference about the values you can give it see:
+	--- https://wiki.facepunch.com/gmod/Tool_Information_Display
 	--- Note: name, stage and op will be assigned automatically for the returned ToolInfo
-	--- @param Tool string # The name of the tool 
+	--- @param Tool string # The name of the tool
 	--- @param Stage string # The name of the stage
 	--- @param Op string # The name of the operation
 	--- @param Info table # The information for the tool
@@ -247,28 +247,26 @@ do -- Tool Functions Loader
 			end
 		end)
 	elseif CLIENT then
-		-- When the client receives tool net vars, update the 
+		-- When the client receives tool net vars, update the
 		net.Receive("ACF_ToolNetVars", function()
 			-- Check UpdateNetVar below for what these mean
 			local ToolName = net.ReadString()
 			local Name = net.ReadString()
 			local Value = net.ReadInt(8)
+			local LocalPly = LocalPlayer()
 
-			if not IsValid( LocalPlayer() ) then return end
+			if not IsValid( LocalPly ) then return end
 
 			local Data = Tools[ToolName]
-			local Tool = LocalPlayer():GetTool(ToolName)
+			local Tool = LocalPly:GetTool(ToolName)
 
 			if not Data then return end
 			if not Tool then return end
 
 			if Name == "Stage" then
-				Tool.Stage = Value
-				Tool.StageData = Data.Indexed[Value]
+				Tool:SetStage(Value)
 			elseif Name == "Operation" then
-				Tool.Operation = Value
-				Tool.OpData = Tool.StageData.Indexed[Value]
-				Tool.DrawToolScreen = Tool.OpData.DrawToolScreen
+				Tool:SetOperation(Value)
 			end
 		end)
 	end
@@ -299,7 +297,7 @@ do -- Tool Functions Loader
 		local Data = Tools[Mode]
 		Data.Tool = Tool
 
-		--- Sets the stage of the tool (also resets the operation to 0)  
+		--- Sets the stage of the tool (also resets the operation to 0)
 		--- Only available on client
 		--- @param self Tool The tool
 		--- @param Stage number The index of the stage (see ToolData.Indexed)
@@ -353,6 +351,8 @@ do -- Tool Functions Loader
 					OnEnterOp(self)
 				end
 			end
+
+			self.DrawToolScreen = self.OpData and self.OpData.DrawToolScreen
 		end
 
 		function Tool:GetOperation()
@@ -525,7 +525,7 @@ do -- Clientside Tool interaction
 		local Key = "ToolMode:%s" -- (e.g. "ToolMode:acf_menu")
 		local Value = "%s:%s" -- (e.g. "Spawner":"Weapon")
 
-		--- Used by the client to network the current state of a tool, its stage and its operation. 
+		--- Used by the client to network the current state of a tool, its stage and its operation.
 		--- @param Tool string The name of the tool (e.g. "acf_menu"/"acf_copy")
 		--- @param Stage string The stage of the tool (e.g. "Spawner"/"Main")
 		--- @param Op string The operation of the tool (e.g. "Weapon"/"Sensor"/etc.)
@@ -543,4 +543,252 @@ do -- Clientside Tool interaction
 			end
 		end
 	end
+end
+
+do -- Ghost entity handling
+	local ModelData = ACF.ModelData
+	local ShouldRun = not SERVER
+	local DrawingSecondary = false
+	local DefaultScale = Vector(1, 1, 1)
+	local ToolEnt
+	local GhostData = {
+		Primary = {Model = "models/props_borealis/bluebarrel001.mdl", Material = "", Scale = Vector(DefaultScale), AbsoluteScale = false, PosOffset = nil, AngOffset = nil},
+		Secondary = {Model = "", Material = "", Scale = Vector(DefaultScale), AbsoluteScale = false, PosOffset = nil, AngOffset = nil},
+	}
+	ACF.GhostEntityData = ACF.GhostEntityData or GhostData
+
+	local function MakeGhostEntity(Tool, Model, Position, Angles)
+		-- Release the old ghost entity
+		Tool:ReleaseGhostEntity()
+
+		-- Don't allow ragdolls/effects to be ghosts
+		if not util.IsValidProp(Model) then return end
+
+		if CLIENT then
+			Tool.GhostEntity = ents.CreateClientProp(Model)
+		else
+			Tool.GhostEntity = ents.Create("prop_physics")
+		end
+
+		-- If there's too many entities we might not spawn..
+		if not IsValid(Tool.GhostEntity) then
+			Tool.GhostEntity = nil
+			return
+		end
+
+		Tool.GhostEntity:SetModel(Model)
+		Tool.GhostEntity:SetPos(Position)
+		Tool.GhostEntity:SetAngles(Angles)
+		Tool.GhostEntity:Spawn()
+
+		-- We do not want physics at all
+		Tool.GhostEntity:PhysicsDestroy()
+
+		Tool.GhostEntity:SetMoveType(MOVETYPE_NONE)
+		Tool.GhostEntity:SetNotSolid(true)
+		Tool.GhostEntity:SetRenderMode(RENDERMODE_TRANSCOLOR)
+		Tool.GhostEntity:SetColor(Color(255, 255, 255, 150))
+
+		-- Do not save this thing in saves/dupes
+		Tool.GhostEntity.DoNotDuplicate = true
+
+		-- Mark this entity as ghost prop for other code
+		Tool.GhostEntity.IsToolGhost = true
+
+		return Tool.GhostEntity
+	end
+
+	local function GetModelDimensions(EntData)
+		local Scale = EntData.Scale
+		local ModelSize = ModelData.GetModelSize(EntData.Model)
+		if not ModelSize then return Vector(0, 0, 0), Vector(0, 0, 0), Vector(0, 0, 0) end
+
+		if Scale and not Scale:IsEqualTol(DefaultScale, 0) and not EntData.AbsoluteScale then
+			Scale = Scale / ModelSize
+		end
+
+		local ModelMesh = ModelData.GetModelMesh(EntData.Model, Scale)
+
+		return ModelMesh, ModelSize, Scale
+	end
+
+	local function ModifyGhostEntity(GhostEnt, EntKey)
+		local EntData = GhostData[EntKey]
+		GhostEnt:SetModel(EntData.Model)
+
+		GhostEnt.ModelMesh, GhostEnt.ModelSize, GhostEnt.Scale = GetModelDimensions(EntData)
+		local ModelMesh, Scale = GhostEnt.ModelMesh, GhostEnt.Scale
+
+		if Scale then
+			local ScaleMatrix = Matrix()
+			ScaleMatrix:Scale(Scale)
+			GhostEnt:EnableMatrix("RenderMultiply", ScaleMatrix)
+
+			if ModelMesh then
+				GhostEnt:PhysicsInitMultiConvex(ModelMesh)
+				GhostEnt:EnableCustomCollisions(true)
+				GhostEnt:SetRenderBounds(GhostEnt:GetCollisionBounds())
+				GhostEnt:DrawShadow(false)
+
+				local PhysObj = GhostEnt:GetPhysicsObject()
+
+				if IsValid(PhysObj) then
+					PhysObj:EnableMotion(false)
+					PhysObj:Sleep()
+				end
+			end
+		end
+
+		if EntData.Material then
+			GhostEnt:SetMaterial(EntData.Material)
+		end
+	end
+
+	function ACF.CreateGhostEntity(Tool)
+		if not ShouldRun then return end
+
+		local Player = Tool:GetOwner()
+		if not IsValid(Player) then return end
+
+		local CurWeapon = Player:GetActiveWeapon()
+		if not IsValid(CurWeapon) or CurWeapon:GetClass() ~= "gmod_tool" then return end
+
+		local CurTool = Player:GetTool()
+		if not CurTool or CurTool.Name ~= "#tool.acf_menu.menu_name" then return end
+
+		local EntKey  = DrawingSecondary and "Secondary" or "Primary"
+		local EntData = GhostData[EntKey]
+
+		if EntData.Model --[[and EntData.Model ~= ""]] then
+			--if not IsValid(Tool.GhostEntity) then
+				local Trace        = Player:GetEyeTrace()
+				local Position     = Trace.HitPos + (Trace.HitNormal * 128) + (EntData.PosOffset or vector_origin)
+				local Angles       = Trace.HitNormal:Angle():Up():Angle() + (EntData.AngOffset or angle_zero)
+
+				MakeGhostEntity(Tool, EntData.Model, Position, Angles)
+			--end
+
+			timer.Simple(0, function()
+				local GhostEnt = Tool.GhostEntity
+				if not IsValid(GhostEnt) then return end
+
+				ToolEnt = Tool
+
+				ModifyGhostEntity(GhostEnt, EntKey)
+			end)
+		end
+	end
+
+	function ACF.UpdateGhostEntity(NewGhostData)
+		if not ShouldRun or not istable(NewGhostData) then return end
+
+		for EntKey, EntData in pairs(NewGhostData) do
+			for DataKey, DataVal in pairs(EntData) do
+				GhostData[EntKey][DataKey] = DataVal
+			end
+		end
+
+		timer.Simple(0, function()
+			local EntKey = DrawingSecondary and "Secondary" or "Primary"
+			if not ToolEnt then return end
+
+			if not IsValid(ToolEnt.GhostEntity) then
+				--ACF.CreateGhostEntity(ToolEnt)
+				return
+			end
+
+			ModifyGhostEntity(ToolEnt.GhostEntity, EntKey)
+		end)
+	end
+
+	function ACF.RenderGhostEntity(Tool)
+		if not ShouldRun then return end
+
+		local GhostEnt = Tool.GhostEntity
+		if not IsValid(GhostEnt) then return end
+
+		local Player = Tool:GetOwner()
+		if not IsValid(Player) then return end
+
+		local Trace = Player:GetEyeTrace()
+		local TraceEnt = Trace.Entity
+		local ShouldDrawSecondary = Player:KeyDown(IN_SPEED)
+		local SecondaryClass = ACF.GetClientData("SecondaryClass")
+		local UpdateClass = ShouldDrawSecondary and SecondaryClass or ACF.GetClientData("PrimaryClass")
+		local EntKey = DrawingSecondary and "Primary" or "Secondary"
+		local EntData = GhostData[EntKey]
+		local Position, Angles
+
+		if DrawingSecondary ~= ShouldDrawSecondary and SecondaryClass ~= "N/A" then
+			DrawingSecondary = ShouldDrawSecondary
+			ModifyGhostEntity(GhostEnt, EntKey)
+		end
+
+		local CanUpdate = IsValid(TraceEnt) and TraceEnt:GetClass() == UpdateClass
+
+		if CanUpdate then
+			Position = TraceEnt:GetPos() + (EntData.PosOffset or vector_origin)
+			Angles   = TraceEnt:GetAngles() + (EntData.AngOffset or angle_zero)
+		else
+			Position = Trace.HitPos + (Trace.HitNormal * 128) + (EntData.PosOffset or vector_origin)
+			Angles   = Trace.HitNormal:Angle():Up():Angle() + (EntData.AngOffset or angle_zero)
+		end
+
+		GhostEnt:SetPos(Position)
+		GhostEnt:SetAngles(Angles)
+
+		if not CanUpdate then
+			ACF.DropToFloor(GhostEnt)
+		end
+	end
+
+	function ACF.ReleaseGhostEntity(Tool)
+		if not ShouldRun then return end
+
+		Tool:ReleaseGhostEntity()
+	end
+
+	function ACF.GetGhostEntity()
+		return ToolEnt and ToolEnt.GhostEntity
+	end
+
+	local HoldOverlay = {} -- Entities to keep overlay on for
+
+	-- Respects occlusion
+	hook.Add("PreDrawOpaqueRenderables", "ACF_Menu_DrawOverlay", function()
+		local Player = LocalPlayer()
+		local Trace = Player:GetEyeTrace()
+		for Entity in pairs(HoldOverlay) do
+			if not IsValid(Entity) then continue end
+			if not Entity.DrawOverlay then continue end
+			if Entity.CanDrawOverlay and not Entity:CanDrawOverlay() then continue end
+
+			Entity:DrawOverlay(Trace)
+		end
+	end)
+
+	function ACF.RunHoldOverlay(Tool)
+		local isFirstTimePredicted = IsFirstTimePredicted()
+		if not isFirstTimePredicted then return end
+
+		local Player = Tool:GetOwner()
+		if Player:KeyPressed(IN_WALK) then
+			local Trace = Player:GetEyeTrace()
+			local Entity = Trace.Entity
+			if not IsValid(Entity) then return end
+			if not Entity.DrawOverlay then return end
+			if HoldOverlay[Entity] then HoldOverlay[Entity] = nil else HoldOverlay[Entity] = true end
+
+			local Weapon = Tool.Weapon
+			Weapon:DoShootEffect( Trace.HitPos, Trace.HitNormal, Trace.Entity, Trace.PhysicsBone, isFirstTimePredicted )
+		end
+	end
+
+	hook.Add("ACF_OnUpdateClientData", "ACF_HandleGhostEntities", function(_, Key)
+		if Key ~= "Primary" and Key ~= "Secondary" then return end
+
+		--if Value == "N/A" then
+			ACF.UpdateGhostEntity({[Key] = {Model = "", Material = "", Scale = Vector(DefaultScale), AbsoluteScale = false, PosOffset = nil, AngOffset = nil}})
+		--end
+	end)
 end

@@ -2,23 +2,25 @@ local ACF         = ACF
 local Classes     = ACF.Classes
 local EngineTypes = Classes.EngineTypes
 local FuelTypes   = Classes.FuelTypes
-local FuelTanks   = Classes.FuelTanks
 local Engines     = Classes.Engines
 local TankSize    = Vector()
 local HPColor     = Color(255, 65, 65)
 local TorqueColor = Color(65, 65, 255)
 local IdleColor   = Color(127, 0, 0)
 
+local acf_menu_multiplytorquemult = CreateClientConVar("acf_menu_multiplytorquemult", "0", true, false, "If true, engine power/torque elements in the menu & overlay will be multiplied by the internal torque multiplier.\nIt should be noted that the torque multiplier is a temporary stopgap for internal code issues, and will be removed in a future mobility update.")
+
+local function GetTorqueMult() return acf_menu_multiplytorquemult:GetBool() and ACF.GetServerData("TorqueMult") or 1 end
 local function UpdateEngineStats(Label, Data)
 	local RPM        = Data.RPM
 	local PeakTqRPM  = math.Round(Data.PeakTqRPM)
-	local PeakkW     = Data.PeakPower
+	local PeakkW     = Data.PeakPower * GetTorqueMult()
 	local PeakkWRPM  = Data.PeakPowerRPM
 	local MinPower   = RPM.PeakMin
 	local MaxPower   = RPM.PeakMax
 	local Mass       = ACF.GetProperMass(Data.Mass)
-	local Torque     = math.Round(Data.Torque)
-	local TorqueFeet = math.Round(Data.Torque * ACF.NmToFtLb)
+	local Torque     = math.Round(Data.Torque * GetTorqueMult())
+	local TorqueFeet = math.Round(Data.Torque * GetTorqueMult() * ACF.NmToFtLb)
 	local Type       = EngineTypes.Get(Data.Type)
 	local Efficiency = Type.Efficiency
 	local FuelList   = ""
@@ -54,17 +56,21 @@ end
 
 local function CreateMenu(Menu)
 	local EngineEntries = Engines.GetEntries()
-	local FuelEntries   = FuelTanks.GetEntries()
+	-- local FuelEntries   = FuelTanks.GetEntries()
 
 	Menu:AddTitle("#acf.menu.engines.settings")
 
+	Menu:AddWikiLink("Engines", "docs/acf_tutorials/engines.html")
+
 	local EngineClass = Menu:AddComboBox()
+	EngineClass:SetName("EngineClass")
 	local EngineList = Menu:AddComboBox()
+	EngineList:SetName("EngineList")
 
 	local EngineBase = Menu:AddCollapsible("#acf.menu.engines.engine_info", nil, "icon16/monitor_edit.png")
 	local EngineName = EngineBase:AddTitle()
 	local EngineDesc = EngineBase:AddLabel()
-	local EnginePreview = EngineBase:AddModelPreview(nil, true)
+	local EnginePreview = EngineBase:AddModelPreview(nil, true, "Primary")
 	local EngineStats = EngineBase:AddLabel()
 
 	local PowerGraph = Menu:AddGraph()
@@ -79,13 +85,38 @@ local function CreateMenu(Menu)
 
 	Menu:AddTitle("#acf.menu.fuel.settings")
 	local FuelType = Menu:AddComboBox()
-	local FuelClass = Menu:AddComboBox()
 
-	local Min = ACF.FuelMinSize
-	local Max = ACF.FuelMaxSize
+	-- Shape selector
+	local FuelShape = Menu:AddComboBox()
+	FuelShape:AddChoice("Box", "Box")
+	FuelShape:AddChoice("Sphere", "Sphere")
+	FuelShape:AddChoice("Cylinder", "Cylinder")
+
+	-- Set default shape
+	local DefaultShape = ACF.GetClientData("FuelShape") or "Box"
+	ACF.SetClientData("FuelShape", DefaultShape, true)
+	FuelShape:ChooseOptionID(DefaultShape == "Sphere" and 2 or DefaultShape == "Cylinder" and 3 or 1)
+	timer.Simple(0, function() if IsValid(FuelShape) then FuelShape:OnSelect(nil, nil, DefaultShape) end end) -- Frown
+
+	local Min = ACF.ContainerMinSize
+	local Max = ACF.ContainerMaxSize
+	local FuelPreview
+
+	-- Set default fuel tank size values before creating sliders to prevent nil value errors
+	local DefaultFuelSizeX = ACF.GetClientNumber("FuelSizeX", (Min + Max) / 2)
+	local DefaultFuelSizeY = ACF.GetClientNumber("FuelSizeY", (Min + Max) / 2)
+	local DefaultFuelSizeZ = ACF.GetClientNumber("FuelSizeZ", (Min + Max) / 2)
+	ACF.SetClientData("FuelSizeX", DefaultFuelSizeX, true)
+	ACF.SetClientData("FuelSizeY", DefaultFuelSizeY, true)
+	ACF.SetClientData("FuelSizeZ", DefaultFuelSizeZ, true)
+
+	local function UpdateSize()
+		-- MARCH: STEVE REMOVE THIS ONCE YOU FIX IT (Or leave it if you are fine with this)
+		ACF.SetClientData("Size", TankSize, true)
+	end
 
 	local SizeX = Menu:AddSlider("#acf.menu.fuel.tank_length", Min, Max)
-	SizeX:SetClientData("TankSizeX", "OnValueChanged")
+	SizeX:SetClientData("FuelSizeX", "OnValueChanged")
 	SizeX:DefineSetter(function(Panel, _, _, Value)
 		local X = math.Round(Value)
 
@@ -95,11 +126,16 @@ local function CreateMenu(Menu)
 
 		FuelType:UpdateFuelText()
 
+		if FuelPreview then
+			FuelPreview:SetModelScale(TankSize * 12)
+		end
+
+		UpdateSize()
 		return X
 	end)
 
 	local SizeY = Menu:AddSlider("#acf.menu.fuel.tank_width", Min, Max)
-	SizeY:SetClientData("TankSizeY", "OnValueChanged")
+	SizeY:SetClientData("FuelSizeY", "OnValueChanged")
 	SizeY:DefineSetter(function(Panel, _, _, Value)
 		local Y = math.Round(Value)
 
@@ -109,11 +145,16 @@ local function CreateMenu(Menu)
 
 		FuelType:UpdateFuelText()
 
+		if FuelPreview then
+			FuelPreview:SetModelScale(TankSize * 12)
+		end
+
+		UpdateSize()
 		return Y
 	end)
 
 	local SizeZ = Menu:AddSlider("#acf.menu.fuel.tank_height", Min, Max)
-	SizeZ:SetClientData("TankSizeZ", "OnValueChanged")
+	SizeZ:SetClientData("FuelSizeZ", "OnValueChanged")
 	SizeZ:DefineSetter(function(Panel, _, _, Value)
 		local Z = math.Round(Value)
 
@@ -123,17 +164,22 @@ local function CreateMenu(Menu)
 
 		FuelType:UpdateFuelText()
 
+		if FuelPreview then
+			FuelPreview:SetModelScale(TankSize * 12)
+		end
+
+		UpdateSize()
 		return Z
 	end)
 
-	local FuelList = Menu:AddComboBox()
 	local FuelBase = Menu:AddCollapsible("#acf.menu.fuel.tank_info", nil, "icon16/cup_edit.png")
 	local FuelDesc = FuelBase:AddLabel()
-	local FuelPreview = FuelBase:AddModelPreview(nil, true)
+	FuelPreview = FuelBase:AddModelPreview(nil, true, "Secondary")
 	local FuelInfo = FuelBase:AddLabel()
 
 	ACF.SetClientData("PrimaryClass", "acf_engine")
 	ACF.SetClientData("SecondaryClass", "acf_fueltank")
+	ACF.SetClientData("FuelTank", "Scalable") -- Set default fuel tank to scalable
 
 	ACF.SetToolMode("acf_menu", "Spawner", "Engine")
 
@@ -160,7 +206,7 @@ local function CreateMenu(Menu)
 		ACF.SetClientData("Engine", Data.ID)
 
 		EngineName:SetText(Data.Name)
-		EngineDesc:SetText((ClassDesc and (ClassDesc .. "\n\n") or "") .. Data.Description)
+		EngineDesc:SetText((ClassDesc and (language.GetPhrase(ClassDesc) .. "\n\n") or "") .. language.GetPhrase(Data.Description))
 
 		EnginePreview:UpdateModel(Data.Model)
 		EnginePreview:UpdateSettings(Data.Preview)
@@ -168,19 +214,19 @@ local function CreateMenu(Menu)
 		UpdateEngineStats(EngineStats, Data)
 
 		PowerGraph:SetXRange(0, Data.RPM.Limit)
-		PowerGraph:SetYRange(0, math.max(math.ceil(Data.PeakPower * ACF.KwToHp), Data.Torque) * 1.1)
+		PowerGraph:SetYRange(0, math.max(math.ceil(Data.PeakPower * GetTorqueMult() * ACF.KwToHp), Data.Torque * GetTorqueMult()) * 1.1)
 		PowerGraph:SetFidelity(10)
 
 		PowerGraph:Clear()
-		PowerGraph:PlotPoint(language.GetPhrase("acf.menu.engines.peak_hp"), Data.PeakPowerRPM, math.Round(Data.PeakPower * ACF.KwToHp), HPColor)
-		PowerGraph:PlotPoint(language.GetPhrase("acf.menu.engines.peak_nm"), Data.PeakTqRPM, math.Round(Data.Torque), TorqueColor)
+		PowerGraph:PlotPoint(language.GetPhrase("acf.menu.engines.peak_hp"), Data.PeakPowerRPM, math.Round(Data.PeakPower * GetTorqueMult() * ACF.KwToHp), HPColor)
+		PowerGraph:PlotPoint(language.GetPhrase("acf.menu.engines.peak_nm"), Data.PeakTqRPM, math.Round(Data.Torque * GetTorqueMult()), TorqueColor)
 
 		PowerGraph:PlotLimitFunction(language.GetPhrase("acf.menu.engines.torque"), Data.RPM.Idle, Data.RPM.Limit, TorqueColor, function(X)
-			return ACF.GetTorque(Data.TorqueCurve, math.Remap(X, Data.RPM.Idle, Data.RPM.Limit, 0, 1)) * Data.Torque
+			return ACF.GetTorque(Data.TorqueCurve, math.Remap(X, Data.RPM.Idle, Data.RPM.Limit, 0, 1)) * Data.Torque * GetTorqueMult()
 		end)
 
 		PowerGraph:PlotLimitFunction(language.GetPhrase("acf.menu.engines.hp"), Data.RPM.Idle, Data.RPM.Limit, HPColor, function(X)
-			return (ACF.GetTorque(Data.TorqueCurve, math.Remap(X, Data.RPM.Idle, Data.RPM.Limit, 0, 1)) * Data.Torque * X) * ACF.KwToHp / 9548.8
+			return (ACF.GetTorque(Data.TorqueCurve, math.Remap(X, Data.RPM.Idle, Data.RPM.Limit, 0, 1)) * Data.Torque * GetTorqueMult() * X) * ACF.KwToHp / 9548.8
 		end)
 
 		PowerGraph:PlotLimitLine(language.GetPhrase("acf.menu.engines.idle_rpm"), false, Data.RPM.Idle, IdleColor)
@@ -188,53 +234,11 @@ local function CreateMenu(Menu)
 		ACF.LoadSortedList(FuelType, Data.Fuel, "ID")
 	end
 
-	function FuelClass:OnSelect(Index, _, Data)
-		if self.Selected == Data then return end
+	function FuelShape:OnSelect(_, _, Data)
+		ACF.SetClientData("FuelShape", Data)
 
-		self.ListData.Index = Index
-		self.Selected = Data
-
-		ACF.LoadSortedList(FuelList, Data.Items, "ID")
-
-		-- Set up fuel tank settings as specified by the class
-		if Data.MenuSettings then
-			Data.MenuSettings(SizeX, SizeY, SizeZ, FuelList)
-		else
-			SizeX:SetVisible(false)
-			SizeY:SetVisible(false)
-			SizeZ:SetVisible(false)
-			FuelList:SetVisible(true)
-		end
-	end
-
-	function FuelList:OnSelect(Index, _, Data)
-		if self.Selected == Data then return end
-
-		self.ListData.Index = Index
-		self.Selected = Data
-
-		local ClassData = FuelClass.Selected
-		local ClassDesc = ClassData.Description
-
-		if ClassDesc and string.StartsWith(ClassDesc, "#") then
-			ClassDesc = language.GetPhrase(ClassDesc)
-		end
-
-		self.Description = (ClassDesc and (ClassDesc .. "\n\n") or "")
-		local ItemDesc = Data.Description
-
-		if ItemDesc then
-			ItemDesc = string.StartsWith(ItemDesc, "#") and language.GetPhrase(ItemDesc) or ItemDesc
-			self.Description = self.Description .. ItemDesc
-		end
-
-		ACF.SetClientData("FuelTank", Data.ID)
-
-		local Model = Data.Model or ClassData.Model
-		local Material = Data.Material or ClassData.Material
-
-		FuelPreview:UpdateModel(Model, Material)
-		FuelPreview:UpdateSettings(Data.Preview or ClassData.Preview)
+		-- Update preview model based on shape
+		FuelPreview:UpdateModel(ACF.ContainerShapeModels[Data], "models/props_canal/metalcrate001d")
 
 		FuelType:UpdateFuelText()
 	end
@@ -252,31 +256,17 @@ local function CreateMenu(Menu)
 
 	function FuelType:UpdateFuelText()
 		if not self.Selected then return end
-		if not FuelList.Selected then return end
 
-		local FuelTank = FuelList.Selected
 		local TextFunc = self.Selected.FuelTankText
 		local FuelText = ""
-		local FuelDescText = ""
 
-		local Wall = ACF.FuelArmor * ACF.MmToInch -- Wall thickness in inches
-		local ClassData = FuelClass.Selected
-		local Volume, Area
+		local Wall = ACF.ContainerArmor * ACF.MmToInch -- Wall thickness in inches
+		local Shape = ACF.GetClientData("FuelShape") or "Box"
 
-		if ClassData.CalcVolume then
-			Volume, Area = ClassData.CalcVolume(TankSize, Wall)
-		else
-			Area = FuelTank.SurfaceArea
-			Volume = FuelTank.Volume - (FuelTank.SurfaceArea * Wall) -- Total volume of tank (cu in), reduced by wall thickness
-		end
+		-- Calculate volume and area using shape calculations
+		local Volume, Area = ACF.ContainerShapes[Shape](TankSize, Wall)
 
-		if ClassData.FuelDescText then
-			FuelDescText = ClassData.FuelDescText()
-		else
-			FuelDescText = ""
-		end
-
-		local Capacity	= Volume * ACF.gCmToKgIn * ACF.TankVolumeMul -- Internal volume available for fuel in liters
+		local Capacity	= Volume * ACF.gCmToKgIn -- Internal volume available for fuel in liters
 		local EmptyMass	= Area * Wall * ACF.InchToCmCu * ACF.SteelDensity -- Total wall volume * cu in to cc * density of steel (kg/cc)
 		local Mass		= EmptyMass + Capacity * self.Selected.Density -- Weight of tank + weight of fuel
 
@@ -287,23 +277,14 @@ local function CreateMenu(Menu)
 			local Liters = math.Round(Capacity, 2)
 			local Gallons = math.Round(Capacity * ACF.LToGal, 2)
 
-			FuelText = FuelText .. Text:format(ACF.FuelArmor, Liters, Gallons, ACF.GetProperMass(Mass), ACF.GetProperMass(EmptyMass))
+			FuelText = FuelText .. Text:format(ACF.ContainerArmor, Liters, Gallons, ACF.GetProperMass(Mass), ACF.GetProperMass(EmptyMass))
 		end
 
-		if not FuelTank.IsExplosive then
-			FuelText = FuelText .. language.GetPhrase("acf.menu.fuel.cannot_explode")
-		end
-
-		if FuelTank.Unlinkable then
-			FuelText = FuelText .. language.GetPhrase("acf.menu.fuel.cannot_link")
-		end
-
-		FuelDesc:SetText(FuelList.Description .. FuelDescText)
+		FuelDesc:SetText("Scalable Fuel Tank\n\nShape: " .. Shape)
 		FuelInfo:SetText(FuelText)
 	end
 
 	ACF.LoadSortedList(EngineClass, EngineEntries, "ID")
-	ACF.LoadSortedList(FuelClass, FuelEntries, "ID")
 end
 
 ACF.AddMenuItem(201, "#acf.menu.entities", "#acf.menu.engines", "car", CreateMenu)

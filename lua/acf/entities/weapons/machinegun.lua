@@ -41,26 +41,12 @@ Weapons.Register("MG", {
 		Min = 900,
 		Max = 600,
 	},
-})
-
-Weapons.RegisterItem("7.62mmMG", "MG", {
-	Caliber = 7.62,
-})
-
-Weapons.RegisterItem("12.7mmMG", "MG", {
-	Caliber = 12.7,
-})
-
-Weapons.RegisterItem("13mmHMG", "MG", {
-	Caliber = 13,
-})
-
-Weapons.RegisterItem("14.5mmMG", "MG", {
-	Caliber = 14.5,
-})
-
-Weapons.RegisterItem("20mmMG", "MG", {
-	Caliber = 20,
+	LimitConVar = {
+		Name = "_acf_machinegun",
+		Amount = 4,
+		Text = "Maximum amount of ACF machine guns a player can create."
+	},
+	CostScalar	= 0.25
 })
 
 ACF.SetCustomAttachment("models/machinegun/machinegun_20mm.mdl", "muzzle", Vector(53.05, 0, -0.11), Angle(0, 0, 90))

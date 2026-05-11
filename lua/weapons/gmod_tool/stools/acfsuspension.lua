@@ -5,6 +5,7 @@ Notes:
 --]]
 
 local ACF = ACF
+local Notify = ACF.Utilities.Notify
 local IsValid = IsValid
 
 TOOL.Category	 = (ACF.CustomToolCategory and ACF.CustomToolCategory:GetBool()) and "ACF" or "Construction"
@@ -150,9 +151,9 @@ if CLIENT then
 						DrawArm(Wheel, Baseplate, Vector(ArmX, ArmY * Mirror, ArmZ), orange)
 						DrawArm(Wheel, Baseplate, Vector(-ArmX, ArmY * Mirror, ArmZ), orange)
 					elseif ArmType == 3 then
-						DrawArm(Wheel, Baseplate, Vector(ArmX, ArmY * Mirror, ArmZ), orange)
-						DrawArm(Wheel, Baseplate, Vector(ArmX, -ArmY * Mirror, ArmZ), orange)
-						DrawArm(Wheel, Baseplate, Vector(-ArmX, 0, ArmZ), orange)
+						DrawArm(Wheel, Baseplate, Vector(-ArmX * math.cos(0), -ArmX * math.sin(0), ArmZ), orange)
+						DrawArm(Wheel, Baseplate, Vector(-ArmX * math.cos(2 * math.pi / 3), -ArmX * math.sin(2 * math.pi / 3), ArmZ), orange)
+						DrawArm(Wheel, Baseplate, Vector(-ArmX * math.cos(4 * math.pi / 3), -ArmX * math.sin(4 * math.pi / 3), ArmZ), orange)
 					end
 				end
 			end
@@ -215,7 +216,7 @@ elseif SERVER then -- Serverside-only stuff
 		else
 			-- Select a wheel for the plate
 			if #self.Selections.Plates == 0 then
-				ACF.SendNotify(Player, false, "You need to select a baseplate first.")
+				Notify.WarningToPlayer(Player, "You need to select a baseplate first.")
 				return
 			end
 
@@ -341,10 +342,10 @@ elseif SERVER then -- Serverside-only stuff
 	end
 
 	-- A specific type of suspension arm arrangement
-	local function ArmFork(Wheel, Baseplate, X, Y, Z)
-		Arm(Wheel, Baseplate, Vector(X, Y, Z))
-		Arm(Wheel, Baseplate, Vector(X, -Y, Z))
-		Arm(Wheel, Baseplate, Vector(-X, 0, Z))
+	local function ArmFork(Wheel, Baseplate, X, _, Z)
+		Arm(Wheel, Baseplate, Vector(-X * math.cos(0), -X * math.sin(0), Z))
+		Arm(Wheel, Baseplate, Vector(-X * math.cos(2 * math.pi / 3), -X * math.sin(2 * math.pi / 3), Z))
+		Arm(Wheel, Baseplate, Vector(-X * math.cos(4 * math.pi / 3), -X * math.sin(4 * math.pi / 3), Z))
 	end
 
 	-- A specific type of suspension arm arrangement
@@ -409,11 +410,12 @@ elseif SERVER then -- Serverside-only stuff
 		local ControlPlate = Selections.ControlPlate
 
 		-- Cover edge cases
-		if not IsValid(Baseplate) then ACF.SendNotify(Player, false, "Drivetrain could not be created: Baseplate missing.") return end
-		if IsValid(Baseplate:GetParent()) then ACF.SendNotify(Player, false, "Drivetrain could not be created: Cannot use a parented entity as a baseplate.") return end
-		if SpringType == 2 and not IsValid(ControlPlate) then ACF.SendNotify(Player, false, "Drivetrain could not be created: Control plate missing.") return end
+		if not IsValid(Baseplate) then Notify.WarningToPlayer(Player, "Drivetrain could not be created", "Baseplate missing.") return end
+		if IsValid(Baseplate:GetParent()) then Notify.EntityWarningToPlayer(Baseplate, Player, "Drivetrain could not be created", "Cannot use a parented entity as a baseplate.") return end
+		if SpringType == 2 and not IsValid(ControlPlate) then Notify.WarningToPlayer(Player, "Drivetrain could not be created", "Control plate missing.") return end
 		for Wheel, _ in pairs(Selections.Wheels or EmptyTable) do
-			if IsValid(Wheel:GetParent()) then ACF.SendNotify(Player, false, "Drivetrain could not be created: Cannot use a parented entity as a wheel.") end
+			-- MARCH: Shouldn't this return if this is the case...? Going to add it now in new-notifications to not miss it, but let me know if this was intentional
+			if IsValid(Wheel:GetParent()) then Notify.EntityWarningToPlayer(Wheel, Player, "Drivetrain could not be created", "Cannot use a parented entity as a wheel.") return end
 		end
 
 		-- Handle makespherical / disable collisions BEFORE making the constraints
@@ -467,7 +469,11 @@ elseif SERVER then -- Serverside-only stuff
 					if PlateIndex == 1 then Axis(Wheel, Plate) -- Non steered wheels
 					else BallSocket(Baseplate, Wheel) HullSocket(Wheel, Plate) end -- Steered wheels
 				else
-					Plate:SetAngles(Angle(0, 90, 0)) -- Set angles to north
+					local Deviation = math.deg(math.acos(Plate:GetForward():Dot(Vector(0, 1, 0))))
+					if Deviation > 0.05 then
+						Notify.EntityWarningToPlayer(Plate, Player, "Drivetrain could not be created", "Plate [" .. tostring(Plate) .. "] must be facing north\nDeviation [" .. tostring(math.Round(Deviation, 2)) .. "].")
+						return
+					end
 					HullSocket(Wheel, Plate) -- Restrict rotation to baseplate or steer plate
 					if ArmType == 1 then ArmForwardLever(Wheel, Baseplate, ArmX, ArmY * Mirror, ArmZ)
 					elseif ArmType == 2 then ArmSidewaysLever(Wheel, Baseplate, ArmX, ArmY * Mirror, ArmZ)
@@ -485,7 +491,7 @@ elseif SERVER then -- Serverside-only stuff
 			end
 		end
 
-		ACF.SendNotify(Player, true, "Drivetrain successfully created.")
+		Notify.NoticeToPlayer(Player, "Drivetrain successfully created.")
 	end
 
 	function TOOL:ClearSuspension()
@@ -501,6 +507,6 @@ elseif SERVER then -- Serverside-only stuff
 			if IsValid(v) and checkOwner(Player, v) then constraint.RemoveAll(v) end
 		end
 
-		ACF.SendNotify(Player, true, "Cleared all constraints in drivetrain")
+		Notify.NoticeToPlayer(Player, "Cleared all constraints in drivetrain")
 	end
 end

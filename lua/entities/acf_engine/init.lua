@@ -8,6 +8,12 @@ local Mobility    = ACF.Mobility
 local MobilityObj = Mobility.Objects
 local MaxDistance = ACF.MobilityLinkDistance * ACF.MobilityLinkDistance
 
+local ENTITY 			= FindMetaTable("Entity")
+local PHYSOBJ			= FindMetaTable("PhysObj")
+
+local IsEntityValid		= ACF.Optimizations.IsEntityValid
+local IsPhysObjValid	= ACF.Optimizations.IsPhysObjValid
+
 --===============================================================================================--
 -- Engine class setup
 --===============================================================================================--
@@ -25,6 +31,8 @@ do
 		Engine:UpdateOverlay()
 		Target:UpdateOverlay()
 
+		Target:InvalidateClientInfo()
+
 		return true, "Engine linked successfully!"
 	end)
 
@@ -39,6 +47,8 @@ do
 
 			Engine:UpdateOverlay()
 			Target:UpdateOverlay()
+
+			Target:InvalidateClientInfo()
 
 			return true, "Engine unlinked successfully!"
 		end
@@ -115,7 +125,6 @@ local Remap        = math.Remap
 local max          = math.max
 local min          = math.min
 local TimerCreate  = timer.Create
-local TimerSimple  = timer.Simple
 local TimerRemove  = timer.Remove
 local TickInterval = engine.TickInterval
 
@@ -179,9 +188,13 @@ end
 
 local function SetActive(Entity, Value, EntTbl)
 	EntTbl = EntTbl or Entity:GetTable()
-	if EntTbl.Active == tobool(Value) then return end
 
-	if not EntTbl.Active then -- Was off, turn on
+	local ActBool = tobool(Value)
+
+	if EntTbl.Active == ActBool then return end -- Already in the desired state
+	if ActBool and EntTbl.Disabled then return end -- Can't activate a disabled engine
+
+	if ActBool then -- Was off, turn on
 		EntTbl.Active = true
 
 		Entity:CalcMassRatio(EntTbl)
@@ -192,21 +205,17 @@ local function SetActive(Entity, Value, EntTbl)
 
 		Entity:UpdateSound(EntTbl)
 
-		TimerSimple(TickInterval(), function()
-			if not IsValid(Entity) then return end
-
-			Entity:CalcRPM(EntTbl)
-		end)
+		Entity:NextThink(Clock.CurTime + TickInterval())
 
 		TimerCreate("ACF Engine Clock " .. Entity:EntIndex(), 3, 0, function()
-			if not IsValid(Entity) then return end
+			if not IsEntityValid(Entity) then return end
 
 			CheckGearboxes(Entity)
 			CheckDistantFuelTanks(Entity)
 
 			Entity:CalcMassRatio(EntTbl)
 		end)
-	else
+	else -- Was on, turn off
 		EntTbl.Active = false
 		EntTbl.FlyRPM = 0
 		EntTbl.Torque = 0
@@ -371,8 +380,6 @@ do -- Spawn and Update functions
 		Entity:SetPos(Pos)
 		Entity:Spawn()
 
-		Entity:UpdateEngineLegality() -- Defaults to unparented
-
 		Player:AddCleanup("acf_engine", Entity)
 		Player:AddCount(Limit, Entity)
 
@@ -403,11 +410,9 @@ do -- Spawn and Update functions
 			Class.OnSpawn(Entity, Data, Class, Engine)
 		end
 
-		ACF.AugmentedTimer(function(cfg) Entity:UpdateFuelMod(cfg) end, function() return IsValid(Entity) end, nil, {MinTime = 1, MaxTime = 2})
+		ACF.AugmentedTimer(function(cfg) Entity:UpdateFuelMod(cfg) end, function() return IsEntityValid(Entity) end, nil, {MinTime = 0.1, MaxTime = 0.25})
 
 		hook.Run("ACF_OnSpawnEntity", "acf_engine", Entity, Data, Class, Engine)
-
-		ACF.CheckLegal(Entity)
 
 		return Entity
 	end
@@ -516,6 +521,7 @@ function ENT:Enable()
 	SetActive(self, Active, self:GetTable())
 
 	self:UpdateOverlay()
+	ACF.CheckLegal(self) -- MARCH: Check parent chain on enabled
 end
 
 function ENT:Disable()
@@ -552,25 +558,19 @@ function ENT:UpdateOutputs(SelfTbl)
 	end
 end
 
-local Text = "%s\n\n%s\nPower: %s kW / %s hp\nTorque: %s Nm / %s ft-lb\nPowerband: %s - %s RPM\nRedline: %s RPM"
-
-function ENT:UpdateOverlayText()
-	local State
+function ENT:ACF_UpdateOverlayState(State)
 	if not ACF.AllowSpecialEngines and self.IsSpecial then
-		State = "Disabled: Special engines are disabled."
+		State:AddError("Disabled: Special engines are disabled.")
 	elseif self.Active then
-		State = "Active"
+		State:AddSuccess("Active")
 	else
-		State = "Idle"
+		State:AddWarning("Idle")
 	end
-	local Name = self.Name
-	local Power, PowerFt = Round(self.PeakPower), Round(self.PeakPower * ACF.KwToHp)
-	local Torque, TorqueFt = Round(self.PeakTorque), Round(self.PeakTorque * ACF.NmToFtLb)
-	local PowerbandMin = self.PeakMinRPM
-	local PowerbandMax = self.PeakMaxRPM
-	local Redline = self.LimitRPM
-
-	return Text:format(State, Name, Power, PowerFt, Torque, TorqueFt, PowerbandMin, PowerbandMax, Redline)
+	State:AddKeyValue("Type", self.Name)
+	State:AddEnginePower("Power", self.PeakPower)
+	State:AddEngineTorque("Torque", self.PeakTorque)
+	State:AddKeyValue("Powerband", ("%s - %s RPM"):format(self.PeakMinRPM, self.PeakMaxRPM))
+	State:AddKeyValue("Redline", ("%s RPM"):format(self.LimitRPM))
 end
 
 ACF.AddInputAction("acf_engine", "Throttle", function(Entity, Value)
@@ -650,24 +650,21 @@ function ENT:DestroySound()
 	self.Sound      = nil
 end
 
-function ENT:CheckEngineLegality()
-	if not ACF.LegalChecks then return true end
-
-	local EntTable = self:GetTable()
+function ENT:ACF_IsLegal()
 	local AllowArbitraryParents = ACF.AllowArbitraryParents
 
-	if not AllowArbitraryParents and not EntTable.ACF_EngineParentValid then
-		return false, "Parenting Issue", "The engine must be parented to an ACF baseplate."
+	-- MARCH: Craftian's change to ACF.CheckLegal calls caused this to break,
+	-- so this self.Active should guard against it.
+	if self.Active then
+		if not AllowArbitraryParents and not self.ACF_EngineParentValid then
+			return false, "Parenting Issue", "The engine must be parented to an ACF baseplate."
+		end
+
+		local Contraption = self:CFW_GetContraption()
+		if not AllowArbitraryParents and not Contraption then return false, "Parenting Issue", "Not part of a contraption (somehow??)" end -- Will this even be triggered?
 	end
 
-	local Contraption = self:GetContraption()
-	if not AllowArbitraryParents and not Contraption then return false, "Parenting Issue", "Not part of a contraption (somehow??)" end -- Will this even be triggered?
-
 	return true
-end
-
-function ENT:UpdateEngineLegality()
-	self.EngineInvalid, self.EngineInvalidReason, self.EngineInvalidMessage = self:CheckEngineLegality()
 end
 
 function ENT:CFW_PreParentedTo(_, NewParent)
@@ -686,12 +683,6 @@ hook.Add("cfw.contraption.entityAdded", "ACF_Engine_ContraptionChecks", function
 		Contraption.HasEngines   = true
 		Contraption.TotalEngines = (Contraption.TotalEngines or 0) + 1
 	end
-
-	if Contraption.Engines then
-		for Engine in pairs(Contraption.Engines) do
-			Engine:UpdateEngineLegality()
-		end
-	end
 end)
 
 hook.Add("cfw.contraption.entityRemoved", "ACF_Engine_ContraptionChecks", function(Contraption, Ent)
@@ -703,18 +694,12 @@ hook.Add("cfw.contraption.entityRemoved", "ACF_Engine_ContraptionChecks", functi
 		Contraption.HasEngines   = next(Contraption.Engines) and true or nil
 		Contraption.TotalEngines = Contraption.HasEngines and 0 or table.Count(Contraption.Engines)
 	end
-
-	if Contraption.Engines then
-		for Engine in pairs(Contraption.Engines) do
-			Engine:UpdateEngineLegality()
-		end
-	end
 end)
 
 -- specialized calcmassratio for engines
 function ENT:CalcMassRatio(SelfTbl)
-	SelfTbl        = SelfTbl or self:GetTable()
-	local Con      = self:GetContraption()
+	SelfTbl        = SelfTbl or ENTITY.GetTable(self)
+	local Con      = ENTITY.CFW_GetContraption(self)
 	local PhysMass = 0
 
 	local Physical, _, Detached = Contraption.GetEnts(self)
@@ -722,10 +707,10 @@ function ENT:CalcMassRatio(SelfTbl)
 	-- Duplex pairs iterates over Physical, then Detached - but we can make Detached nil
 	-- if DetachedPhysmassRatio == false
 	for K in ACF.DuplexPairs(Physical, ACF.DetachedPhysmassRatio and Detached or nil) do
-		local Phys = K:GetPhysicsObject() -- Should always exist, but just in case
+		local Phys = ENTITY.GetPhysicsObject(K) -- Should always exist, but just in case
 
-		if IsValid(Phys) then
-			local Mass = Phys:GetMass()
+		if IsPhysObjValid(Phys) then
+			local Mass = PHYSOBJ.GetMass(Phys)
 			PhysMass   = PhysMass + Mass
 		end
 	end
@@ -747,30 +732,44 @@ function ENT:CalcMassRatio(SelfTbl)
 end
 
 function ENT:GetConsumption(Throttle, RPM, FuelTank, SelfTbl)
-	SelfTbl = SelfTbl or self:GetTable()
+	SelfTbl = SelfTbl or ENTITY.GetTable(self)
 	FuelTank = FuelTank or SelfTbl.FuelTank
-	if not IsValid(FuelTank) then return 0 end
+	if not IsEntityValid(FuelTank) then return 0 end
 
 	if SelfTbl.FuelType == "Electric" then
-		return Throttle * SelfTbl.FuelUse * SelfTbl.Torque * RPM * 1.05e-4 / self.FuelCrewMod
+		return Throttle * SelfTbl.FuelUse * SelfTbl.Torque * RPM * 1.05e-4 / SelfTbl.FuelCrewMod
 	else
 		local IdleConsumption = SelfTbl.PeakPower * 5e2
-		return SelfTbl.FuelUse * (IdleConsumption + Throttle * SelfTbl.Torque * RPM) / FuelTank.FuelDensity / self.FuelCrewMod
+		return SelfTbl.FuelUse * (IdleConsumption + Throttle * SelfTbl.Torque * RPM) / FuelTank.FuelDensity / SelfTbl.FuelCrewMod
 	end
 end
 
+
+function ENT:Think()
+	local SelfTbl = ENTITY.GetTable(self)
+
+	if not SelfTbl.Active then return end
+	if SelfTbl.Disabled then return end
+
+	self:CalcRPM(SelfTbl)
+
+	-- CalcRPM can turn the engine off or disable it (e.g. no fuel or legality issues)
+	if not SelfTbl.Active or SelfTbl.Disabled then return end
+
+	self:NextThink(CurTime() + TickInterval())
+
+	return true
+end
+
+-- We're doing an experiment here. It seems that the entity table stores the functions for the entity
+-- class as well. So we don't need to do self:Function for every entity (which would invoke the __index function)
+-- If true then we should apply this in the rest of the hot paths.
 function ENT:CalcRPM(SelfTbl)
 	-- Reusing these entity table pointers helps us cut down on __index calls
 	-- This helps to massively improve performance throughout the entire drivetrain
-	SelfTbl = SelfTbl or self:GetTable()
-	if not SelfTbl.Active then return end
+	SelfTbl = SelfTbl or ENTITY.GetTable(self)
 
 	if not ACF.AllowSpecialEngines and SelfTbl.IsSpecial then return end
-	if SelfTbl.Disabled then return end
-
-	if not SelfTbl.EngineInvalid then
-		ACF.DisableEntity(self, SelfTbl.EngineInvalidReason, SelfTbl.EngineInvalidMessage, math.random(5, 7))
-	end
 
 	local ClockTime  = Clock.CurTime
 	local DeltaTime  = ClockTime - SelfTbl.LastThink
@@ -793,15 +792,14 @@ function ENT:CalcRPM(SelfTbl)
 	local Throttle = RevLimited and 0 or SelfTbl.Throttle
 
 	-- Calculate fuel usage
-	if IsValid(FuelTank) then
+	if IsEntityValid(FuelTank) then
 		SelfTbl.FuelTank = FuelTank
 		SelfTbl.FuelType = FuelTank.FuelType
 
-		local Consumption = self:GetConsumption(Throttle, FlyRPM, FuelTank, SelfTbl) * DeltaTime
+		local Consumption = SelfTbl.GetConsumption(self, Throttle, FlyRPM, FuelTank, SelfTbl) * DeltaTime
 
 		SelfTbl.FuelUsage = 60 * Consumption / DeltaTime
-
-		FuelTank:Consume(Consumption, FuelTank:GetTable())
+		ENTITY.GetTable(FuelTank).Consume(FuelTank, Consumption)
 	elseif ACF.RequireFuel then -- Stay active if fuel consumption is disabled
 		SetActive(self, false, SelfTbl)
 
@@ -842,9 +840,10 @@ function ENT:CalcRPM(SelfTbl)
 
 		-- Get the requirements for torque for the gearboxes (Max clutch rating minus any wheels currently spinning faster than the Flywheel)
 		for Ent, Link in pairs(BoxesTbl) do
-			if not Ent.Disabled then
+			local EntTable = ENTITY.GetTable(Ent)
+			if not EntTable.Disabled then
 				Boxes = Boxes + 1
-				Link.ReqTq = Ent:Calc(FlyRPM, Inertia)
+				Link.ReqTq = EntTable.Calc(Ent, FlyRPM, Inertia)
 				TotalReqTq = TotalReqTq + Link.ReqTq
 			end
 		end
@@ -856,7 +855,7 @@ function ENT:CalcRPM(SelfTbl)
 
 		-- Split the torque fairly between the gearboxes who need it
 		for Ent, Link in pairs(BoxesTbl) do
-			Link:TransferGearbox(Ent, Link.ReqTq * AvailRatio * MassRatio, DeltaTime, MassRatio)
+			Link:TransferGearbox(Ent, Link.ReqTq * AvailRatio * MassRatio, DeltaTime, MassRatio, FlyRPM)
 			--Ent:Act(Link.ReqTq * AvailRatio * MassRatio, DeltaTime, MassRatio)
 		end
 	end
@@ -864,14 +863,8 @@ function ENT:CalcRPM(SelfTbl)
 	SelfTbl.FlyRPM = FlyRPM - min(TorqueDiff, TotalReqTq) / Inertia
 	SelfTbl.LastThink = ClockTime
 
-	self:UpdateSound(SelfTbl)
-	self:UpdateOutputs(SelfTbl)
-
-	TimerSimple(TickInterval(), function()
-		if not IsValid(self) then return end
-
-		self:CalcRPM(SelfTbl)
-	end)
+	SelfTbl.UpdateSound(self, SelfTbl)
+	SelfTbl.UpdateOutputs(self, SelfTbl)
 end
 
 function ENT:PreEntityCopy()
@@ -944,6 +937,12 @@ function ENT:PostEntityPaste(Player, Ent, CreatedEntities)
 	self.BaseClass.PostEntityPaste(self, Player, Ent, CreatedEntities)
 end
 
+function ENT:GetCost()
+	local selftbl = self:GetTable()
+
+	return math.max(5, (selftbl.PeakTorque / 160) + (selftbl.PeakPower / 80))
+end
+
 function ENT:OnRemove()
 	local Class = self.ClassData
 
@@ -981,7 +980,7 @@ do	-- NET SURFER 2.0
 	net.Receive("ACF_RequestEngineInfo", function(_, Ply)
 		local Entity = net.ReadEntity()
 
-		if IsValid(Entity) then
+		if IsEntityValid(Entity) then
 			local Outputs    = {}
 			local FuelTanks  = {}
 			local Driveshaft = Entity.Out.Pos

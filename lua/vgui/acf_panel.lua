@@ -130,7 +130,11 @@ function PANEL:AddButton(Text, Command, ...)
 	Panel:SetFont("ACF_Control")
 
 	if Command then
-		Panel:SetConsoleCommand(Command, ...)
+		if isfunction(Command) then
+			Panel.DoClick = Command
+		else
+			Panel:SetConsoleCommand(Command, ...)
+		end
 	end
 
 	return Panel
@@ -146,10 +150,17 @@ function PANEL:AddCheckBox(Text, ConVar)
 		Panel:SetConVar(ConVar)
 	end
 
+	--- Updates the value of the checkbox to match the data var
+	--- And defines a setter function to react to OnChanged
+	--- If you want special logic for your DefineSetter, you can override after this call.
 	function Panel:LinkToServerData(Key)
 		local Value = ACF.GetSetting(Key)
 		self:SetValue(Value)
 		self:SetServerData(Key, "OnChange")
+		self:DefineSetter(function(Panel, _, _, Value)
+			Panel:SetValue(Value)
+			return Value
+		end)
 	end
 
 	return Panel
@@ -394,22 +405,29 @@ function PANEL:AddSlider(Title, Min, Max, Decimals)
 
 	Panel.Label:SetFont("ACF_Control")
 
+	--- Updates the value of the slider to match the data var
+	--- And defines a setter function to react to OnValueChanged
+	--- If you want special logic for your DefineSetter, you can override after this call.
 	function Panel:LinkToServerData(Key)
 		local Value, SettingData = ACF.GetSetting(Key)
 		Panel:SetDecimals(SettingData.Decimals or 0)
 		Panel:SetMinMax(SettingData.Min, SettingData.Max)
 		Panel:SetValue(Value)
 		self:SetServerData(Key, "OnValueChanged")
+		self:DefineSetter(function(Panel, _, _, Value)
+			Panel:SetValue(Value)
+			return Value
+		end)
 	end
 
 	return Panel
 end
 
 function PANEL:AddListView()
-	local LineHeight = 20
 	local Panel = self:AddPanel("DListView")
 	Panel:SetMultiSelect(false)
 	Panel:SetWidth(30)
+	Panel:SetDataHeight(20)
 
 	local AddColumn = Panel.AddColumn
 	local AddLine = Panel.AddLine
@@ -432,7 +450,7 @@ function PANEL:AddListView()
 			end
 		end
 
-		self:SetHeight(LineHeight * #self.Lines)
+		self:SetHeight(self:GetHeaderHeight() + (self:GetDataHeight() * #self.Lines))
 
 		return Line
 	end
@@ -557,6 +575,18 @@ function PANEL:AddPonderAddonCategory(AddonID, CategoryID)
 
 		local UI = Ponder.UIWindow
 		UI:LoadAddonCategoriesIndex(AddonID, CategoryID)
+	end
+
+	return Button
+end
+
+function PANEL:AddWikiLink(Name, RelativeURL)
+	local Text = language.GetPhrase("See Wiki Page For %s")
+
+	local Button = self:AddButton(Text:format(Name))
+
+	function Button:DoClick()
+		ACF.OpenWikiArticle(RelativeURL)
 	end
 
 	return Button
@@ -899,10 +929,9 @@ local function BoxSDF(P, Box)
 	return D1 + D2
 end
 
-function PANEL:AddModelPreview(Model, Rotate)
+function PANEL:AddModelPreview(Model, Rotate, GhostEntClass)
 	local Settings = {
-		Height   = 120,
-		FOV      = 60,
+		Height   = 120,				-- Default height of the panel
 
 		Pitch    = 15,				-- Default pitch angle, camera will kinda bob up and down with nonzero setting
 		Rotation = Angle(0, -35, 0) -- Default rotation rate
@@ -917,9 +946,39 @@ function PANEL:AddModelPreview(Model, Rotate)
 	Panel.LastMouseOffset = Vector(0, 0)
 
 	Panel.RotationDirection = 1
+	Panel.ModelScale = Vector(1, 1, 1)
+	Panel.ScaleMatrix = Matrix()
 
 	function Panel:SetRotateModel(Bool)
 		self.Rotate = tobool(Bool)
+	end
+
+	function Panel:SetModelScale(Scale, AbsoluteScale)
+		if not Scale then return end
+
+		if isnumber(Scale) then
+			Scale = Vector(Scale, Scale, Scale)
+		end
+
+		self.ModelScale = Scale
+
+		local BoxSize = self.BoxSize
+		local BaseCamDistance = 1.2 * math.max(BoxSize.x, math.max(BoxSize.y, BoxSize.z))
+		self.CamDistance = BaseCamDistance + math.max(Scale.x, math.max(Scale.y, Scale.z))
+
+		local Entity = self:GetEntity()
+		Scale = AbsoluteScale and Scale or Scale / BoxSize
+		self.ScaleMatrix = Matrix()
+		self.ScaleMatrix:Scale(Scale)
+		Entity:EnableMatrix("RenderMultiply", self.ScaleMatrix)
+
+		if GhostEntClass == "Primary" or GhostEntClass == "Secondary" then
+			local GhostData = {
+				[GhostEntClass] = {Scale = Scale or Vector(1, 1, 1), AbsoluteScale = AbsoluteScale, PosOffset = self.GhostPosOffset, AngOffset = self.GhostAngOffset}
+			}
+
+			ACF.UpdateGhostEntity(GhostData)
+		end
 	end
 
 	function Panel:DrawEntity(Bool)
@@ -944,7 +1003,6 @@ function PANEL:AddModelPreview(Model, Rotate)
 		end
 
 		local Size = ModelData.GetModelSize(Path)
-
 		local StartMatrix = Matrix()
 
 		-- looks a bit nicer with this
@@ -971,10 +1029,25 @@ function PANEL:AddModelPreview(Model, Rotate)
 		self:SetModel(Path)
 		self:SetCamPos(Center + Vector(-self.CamDistance, 0, 0))
 
+		local ModelInfo = util.GetModelInfo(Path)
+		local Dimensions = (ModelInfo.HullMax - ModelInfo.HullMin)
+		local Size = Dimensions:Length()
+		local FOV = math.deg(math.atan(Size / self.CamDistance))
+		local ClampedFOV = math.min(2 * FOV, 150) -- Probably won't need more than 150 FOV
+		self.DefaultFOV = ClampedFOV
+		self:SetFOV(ClampedFOV)
+
 		if Material then
 			local Entity = self:GetEntity()
-
 			Entity:SetMaterial(Material)
+		end
+
+		if GhostEntClass == "Primary" or GhostEntClass == "Secondary" then
+			local GhostData = {
+				[GhostEntClass] = {Model = Path, Material = Material or "", Scale = self.ModelScale or Vector(1, 1, 1), PosOffset = self.GhostPosOffset, AngOffset = self.GhostAngOffset}
+			}
+
+			ACF.UpdateGhostEntity(GhostData)
 		end
 	end
 
@@ -982,7 +1055,17 @@ function PANEL:AddModelPreview(Model, Rotate)
 		if not istable(Data) then Data = nil end
 
 		self:SetHeight(Data and Data.Height or Settings.Height)
-		self:SetFOV(Data and Data.FOV or Settings.FOV)
+		self:SetFOV(Data and Data.FOV or self.DefaultFOV)
+		self.GhostPosOffset = Data and Data.PosOffset
+		self.GhostAngOffset = Data and Data.AngOffset
+
+		-- Apply bodygroup if specified (group 0 for all munition models)
+		if Data and Data.Bodygroup ~= nil then
+			local Entity = self:GetEntity()
+			if IsValid(Entity) then
+				Entity:SetBodygroup(0, Data.Bodygroup)
+			end
+		end
 	end
 
 	function Panel:OnMousePressed(Button)
@@ -1157,6 +1240,56 @@ function PANEL:AddTable(Width, Height, BorderColor, BorderWidth)
 	end
 
 	return TablePanel
+end
+
+for TypeName, TypeDef in ACF.Classes.Entities.IterateTypes() do
+	if TypeDef.CreateMenuItem then
+		PANEL["Add" .. TypeName .. "UserVar"] = function(self, Ctx, Text, VarName, ...)
+			Ctx:SetCurrentVar(VarName) -- Initialize the variable for the validation context now so
+			-- the specs calls just work in CreateMenuItem. If the consumer wants VarName, it's available
+			-- in the context...
+			local Panel = TypeDef.CreateMenuItem(self, Ctx, Text, ...)
+			return Panel
+		end
+	else
+		PANEL["Add" .. TypeName .. "UserVar"] = function() error("ACF auto-register type '" .. TypeName .. "' does not contain a CreateMenuItem method") end
+	end
+end
+
+-- Called after a menu item has been fully built (ie. something in menu/items_cl)
+-- Was designed because class views wait until all elements are available, but I'm trying to flesh
+-- out a less annoying API with autoregister
+function PANEL:EnqueuePostBuildFn(PostBuildFn)
+	if not self.PostBuildFnQueue then
+		self.PostBuildFnQueue = {PostBuildFn}
+	else
+		self.PostBuildFnQueue[#self.PostBuildFnQueue + 1] = PostBuildFn
+	end
+end
+
+function PANEL:ClearPostBuildFns()
+	self.PostBuildFnQueue = nil
+end
+
+function PANEL:ExecutePostBuildFns()
+	local Enqueued = self.PostBuildFnQueue
+	if not Enqueued then return end
+	for _, Fn in ipairs(Enqueued) do
+		Fn(self)
+	end
+	self:ClearPostBuildFns()
+end
+
+function PANEL:SendUserVarChangedSignal(Producer, KeyChanged, Value)
+	if self == Producer and self.ACF_OnUpdate then
+		self:ACF_OnUpdate(KeyChanged, Producer, Value)
+	end
+	for _, Panel in ipairs(self:GetChildren()) do
+		if Panel ~= Producer and Panel.ACF_OnUpdate then
+			Panel.ACF_OnUpdate(Panel, KeyChanged, Producer, Value)
+		end
+		PANEL.SendUserVarChangedSignal(Panel, Producer, KeyChanged, Value)
+	end
 end
 
 derma.DefineControl("ACF_Panel", "", PANEL, "Panel")

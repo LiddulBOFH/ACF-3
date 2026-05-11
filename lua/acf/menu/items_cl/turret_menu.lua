@@ -14,13 +14,16 @@ local function CreateMenu(Menu)
 	Menu:AddLabel("#acf.menu.turrets.menu_desc")
 
 	local ClassList		= Menu:AddComboBox()
+	ClassList:SetName("TurretClass")
 	local ClassDesc		= Menu:AddLabel()
 	local ComponentClass	= Menu:AddComboBox()
+	ComponentClass:SetName("TurretComponentClass")
 
 	local Base			= Menu:AddCollapsible("#acf.menu.turrets.components", nil, "icon16/cd_edit.png")
 	local ComponentName	= Base:AddTitle()
 	local ComponentDesc	= Base:AddLabel()
-	local ComponentPreview = Base:AddModelPreview(_, true)
+	local ComponentPreview = Base:AddModelPreview(nil, true, "Primary")
+	Base.ComponentPreview = ComponentPreview
 
 	function ClassList:OnSelect(Index, _, Data)
 		if self.Selected == Data then return end

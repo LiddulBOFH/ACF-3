@@ -23,27 +23,73 @@ do -- Custom fonts
 	})
 end
 
-do -- Networked notifications
-	local notification = notification
-	local Messages = ACF.Utilities.Messages
-	local ReceiveShame = GetConVar("acf_legalshame")
+-- Wiki renderer
+do
+	function ACF.OpenWikiArticle(Article)
+		local URL = "https://acf-team.github.io/Wiki/" .. Article
+		local Panel = vgui.Create("DPanel")
+		local startTime = SysTime()
 
-	net.Receive("ACF_Notify", function()
-		local Type = NOTIFY_ERROR
+		Panel:SetSize(ScrW() * 0.85, ScrH() * 0.85)
+		Panel:Center()
+		Panel:MakePopup()
 
-		if net.ReadBool() then
-			Type = NOTIFY_GENERIC
-		else
-			surface.PlaySound("buttons/button10.wav")
+		local BackColor = color_white:Copy()
+		BackColor.a = 0
+		local Back = Panel:Add("DButton")
+		Back:Dock(TOP)
+		Back:SetPaintBackground(false)
+		Back:SetColor(BackColor)
+		Back:SetText("Exit")
+		Back:SetFont("ACF_Title")
+		function Back:DoClick()
+			Panel:Remove()
 		end
 
-		notification.AddLegacy(net.ReadString(), Type, 7)
-	end)
+		local HTML = Panel:Add("DHTML")
+		HTML:Dock(FILL)
+		HTML:OpenURL(URL)
+		HTML:DockMargin(16, 16, 16, 16)
 
-	net.Receive("ACF_NameAndShame", function()
-		if not ReceiveShame:GetBool() then return end
-		Messages.PrintLog("Error", net.ReadString())
-	end)
+		local DHTML_Paint = HTML.Paint
+		function HTML:Paint(W, H)
+			DHTML_Paint(self, W, H)
+		end
+
+		function Panel:Paint(W, H)
+			Derma_DrawBackgroundBlur(self, startTime)
+			BackColor.a = math.ease.InCubic(math.Clamp(SysTime() - startTime - 0.6, 0, 1)) * 255
+			Back:SetColor(BackColor)
+
+			local Size = ScrH() * 0.05
+			local CenterX, CenterY = W / 2, H / 2
+			local Radius = Size / 2
+			local Spokes = 12
+			local Time = SysTime()
+			for I = 0, Spokes - 1 do
+				local Angle = math.rad((I / Spokes) * 360 - 90)
+				local Frac = 1 - (((I / Spokes) + Time * 1.5) % 1)
+				local Alpha = Frac * 100
+				local Thick = Size * 0.02
+				local InnerRadius = Radius * 0.4
+				local OuterRadius = Radius * 0.85
+				local X1 = CenterX + math.cos(Angle) * InnerRadius
+				local Y1 = CenterY + math.sin(Angle) * InnerRadius
+				local X2 = CenterX + math.cos(Angle) * OuterRadius
+				local Y2 = CenterY + math.sin(Angle) * OuterRadius
+				surface.SetDrawColor(255, 255, 255, Alpha)
+				surface.DrawLine(X1, Y1, X2, Y2)
+				for T = -Thick / 2, Thick / 2 do
+					local Offset = math.abs(Angle) < math.rad(45) or math.abs(Angle - math.pi) < math.rad(45)
+					if Offset then
+						surface.DrawLine(X1, Y1 + T, X2, Y2 + T)
+					else
+						surface.DrawLine(X1 + T, Y1, X2 + T, Y2)
+					end
+				end
+			end
+		end
+	end
 end
 
 do -- Panel helpers
@@ -461,12 +507,15 @@ do -- Default gearbox menus
 				local TotalRatio = ValuesData.TotalRatio
 				local FinalDrive = ValuesData.FinalDrive
 				local WheelDiameter = ValuesData.WheelDiameter
-				local Multiplier = math.pi * UpshiftRPM / TotalRatio * FinalDrive * WheelDiameter / (60 * UnitMult)
-				if UseLegacyRatios then Multiplier = 1 / Multiplier end
+				local Multiplier = math.pi * UpshiftRPM * WheelDiameter / (60 * UnitMult)
+
+				if not UseLegacyRatios then Multiplier = Multiplier / TotalRatio / FinalDrive
+				else Multiplier = Multiplier * TotalRatio * FinalDrive end
+
 				for I = 1, Gears do
 					local Gear = ValuesData["Gear" .. I]
-					if UseLegacyRatios then Gear = 1 / Gear end
-					ACF.SetClientData("Shift" .. I, Multiplier / Gear)
+					if not UseLegacyRatios then ACF.SetClientData("Shift" .. I, Multiplier / Gear)
+					else ACF.SetClientData("Shift" .. I, Multiplier * Gear) end
 				end
 			end
 		end
@@ -488,6 +537,7 @@ do -- Default turret menus
 			ACF.SetClientData("Turret", Data.ID)
 			ACF.SetClientData("Destiny", "Turrets")
 			ACF.SetClientData("PrimaryClass", "acf_turret")
+			ACF.SetClientData("SecondaryClass", "N/A")
 
 			local TurretData	= {
 				Ready		= false,
@@ -677,6 +727,17 @@ do -- Default turret menus
 				TurretData.RingHeight	= TurretClass.GetRingHeight({Type = Data.ID, Ratio = Data.Size.Ratio}, N)
 				TurretData.MaxMass		= MaxMass
 
+				-- :( this addon is a prison
+				if Menu.ComponentPreview then
+					local RingHeight = TurretData.RingHeight
+
+					if Data.ID == "Turret-H" then
+						Menu.ComponentPreview:SetModelScale(Vector(N, N, RingHeight))
+					else
+						Menu.ComponentPreview:SetModelScale(N / 20, true)
+					end
+				end
+
 				EstDist:SetMinMax(0, math.max(N * 2, 24))
 				MaxSpeed:SetValue(0)
 
@@ -736,6 +797,7 @@ do -- Default turret menus
 			ACF.SetClientData("Motor", Data.ID)
 			ACF.SetClientData("Destiny", "TurretMotors")
 			ACF.SetClientData("PrimaryClass", "acf_turret_motor")
+			ACF.SetClientData("SecondaryClass", "N/A")
 
 			Menu:AddLabel(language.GetPhrase("acf.menu.turrets.motors.speed"):format(Data.Speed))
 
@@ -860,6 +922,10 @@ do -- Default turret menus
 
 				MotorInfo:UpdateSim()
 
+				if Menu.ComponentPreview then
+					Menu.ComponentPreview:SetModelScale(N, true)
+				end
+
 				return N
 			end)
 			CompSize:SetValue(1)
@@ -935,12 +1001,17 @@ do -- Default turret menus
 			ACF.SetClientData("Gyro", Data.ID)
 			ACF.SetClientData("Destiny", "TurretGyros")
 			ACF.SetClientData("PrimaryClass", "acf_turret_gyro")
+			ACF.SetClientData("SecondaryClass", "N/A")
 
 			local MassText = language.GetPhrase("acf.menu.turrets.mass_text")
 			Menu:AddLabel(MassText:format(Data.Mass))
 
 			if Data.IsDual then
 				Menu:AddLabel("#acf.menu.gyros.dual_desc")
+			end
+
+			if Menu.ComponentPreview then
+				Menu.ComponentPreview:SetModelScale(1, true)
 			end
 		end
 	end
@@ -950,9 +1021,14 @@ do -- Default turret menus
 			ACF.SetClientData("Computer", Data.ID)
 			ACF.SetClientData("Destiny", "TurretComputers")
 			ACF.SetClientData("PrimaryClass", "acf_turret_computer")
+			ACF.SetClientData("SecondaryClass", "N/A")
 
 			local MassText = language.GetPhrase("acf.menu.turrets.mass_text")
 			Menu:AddLabel(MassText:format(Data.Mass))
+
+			if Menu.ComponentPreview then
+				Menu.ComponentPreview:SetModelScale(1, true)
+			end
 		end
 	end
 

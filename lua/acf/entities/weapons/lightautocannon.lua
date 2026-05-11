@@ -47,18 +47,12 @@ Weapons.Register("LAC", {
 		Min = 600,
 		Max = 400,
 	},
-})
-
-Weapons.RegisterItem("20mmHMG", "LAC", {
-	Caliber = 20,
-})
-
-Weapons.RegisterItem("30mmHMG", "LAC", {
-	Caliber = 30,
-})
-
-Weapons.RegisterItem("40mmHMG", "LAC", {
-	Caliber = 40,
+	LimitConVar = {
+		Name = "_acf_lightautocannon",
+		Amount = 4,
+		Text = "Maximum amount of ACF light auto cannons a player can create."
+	},
+	CostScalar	= 0.5
 })
 
 ACF.SetCustomAttachments("models/machinegun/machinegun_40mm_compact.mdl", {

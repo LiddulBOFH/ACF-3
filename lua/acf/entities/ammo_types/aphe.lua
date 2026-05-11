@@ -3,18 +3,19 @@ local Classes   = ACF.Classes
 local Damage    = ACF.Damage
 local AmmoTypes = Classes.AmmoTypes
 local Ammo      = AmmoTypes.Register("APHE", "AP")
-
+local Clock 	= ACF.Utilities.Clock
 
 function Ammo:OnLoaded()
 	Ammo.BaseClass.OnLoaded(self)
 
 	self.Name		 = "Armor Piercing High Explosive"
 	self.SpawnIcon   = "acf/icons/shell_aphe.png"
-	self.Model		 = "models/munitions/round_100mm_ap_shot.mdl"
+	self.Bodygroup   = 1 -- APHE bodygroup index
 	self.Description = "#acf.descs.ammo.aphe"
 	self.Blacklist = {
 		GL = true,
 		MG = true,
+		MO = true,
 		SL = true,
 		RAC = true,
 	}
@@ -70,7 +71,7 @@ function Ammo:BaseConvert(ToolData)
 	Data.ShovePower = 0.1
 	Data.LimitVel   = 700 --Most efficient penetration speed in m/s
 	Data.Ricochet   = 65 --Base ricochet angle
-	Data.CanFuze    = Data.Caliber * 10 > ACF.MinFuzeCaliber -- Can fuze on calibers > 20mm
+	Data.CanFuze    = Data.Caliber * 10 >= ACF.MinFuzeCaliber -- Can fuze on calibers > 20mm
 
 	GUIData.MinFillerVol = 0
 
@@ -90,8 +91,13 @@ end
 if SERVER then
 	local Entities = Classes.Entities
 	local Objects  = Damage.Objects
+	local Conversion	= ACF.PointConversion
 
 	Entities.AddArguments("acf_ammo", "FillerRatio") -- Adding extra info to ammo crates
+
+	function Ammo:GetCost(BulletData)
+		return ((BulletData.ProjMass - BulletData.FillerMass) * Conversion.Steel) + (BulletData.PropMass * Conversion.Propellant) + (BulletData.FillerMass * Conversion.CompB)
+	end
 
 	function Ammo:OnLast(Entity)
 		Ammo.BaseClass.OnLast(self, Entity)
@@ -112,12 +118,11 @@ if SERVER then
 		Entity:SetNW2Float("FillerMass", BulletData.FillerMass)
 	end
 
-	function Ammo:GetCrateText(BulletData)
-		local BaseText = Ammo.BaseClass.GetCrateText(self, BulletData)
-		local Text	   = BaseText .. "\nBlast Radius: %s m\nBlast Energy: %s KJ"
-		local Data	   = self:GetDisplayData(BulletData)
-
-		return Text:format(math.Round(Data.BlastRadius, 2), math.Round(BulletData.FillerMass * ACF.HEPower, 2))
+	function Ammo:UpdateCrateOverlay(BulletData, State)
+		Ammo.BaseClass.UpdateCrateOverlay(self, BulletData, State)
+		local Data = self:GetDisplayData(BulletData)
+		State:AddNumber("Blast Radius", Data.BlastRadius, " m", 2)
+		State:AddNumber("Blast Energy", BulletData.FillerMass * ACF.HEPower, " kJ", 2)
 	end
 
 	function Ammo:OnFlightEnd(Bullet, Trace)
@@ -132,6 +137,7 @@ if SERVER then
 		local Fragment = Bullet.ProjMass - Filler
 		local DmgInfo  = Objects.DamageInfo(Bullet.Owner, Bullet.Gun)
 
+		Bullet.KillTime = Clock.CurTime
 		Damage.createExplosion(Position, Filler, Fragment, nil, DmgInfo)
 
 		Ammo.BaseClass.OnFlightEnd(self, Bullet, Trace)

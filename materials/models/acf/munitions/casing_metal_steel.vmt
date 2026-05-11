@@ -1,0 +1,24 @@
+VertexLitGeneric
+{
+	$basetexture "models/acf/munitions/munitions"
+	$bumpmap "models/acf/munitions/munitions_normal"
+	$surfaceprop canister
+
+	$envmap "env_cubemap"
+	$normalmapalphaenvmapmask 1
+	$envmaptint "[0.0015 0.0015 0.0015]"
+	$envmapfresnel 1
+	$envmapanisotropy 1
+	$envmapanisotropyscale 1
+	
+	$color2 "[0.6 0.6 0.525]"
+	$blendtintbybasealpha 1
+	
+	$phong 1
+	$phongfresnelranges "[8 8 12]"
+	$phongtint "[0.15 0.15 0.125]"
+	$phongexponent 2
+	$phongboost 2
+
+	$model 1
+}

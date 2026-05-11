@@ -17,13 +17,17 @@ local function CreateMenu(Menu)
 
 	Menu:AddTitle("#acf.menu.sensors.settings")
 
+	Menu:AddWikiLink("Radars", "docs/acf_missiles_tutorials/radars.html")
+	Menu:AddWikiLink("Warning Receivers", "docs/acf_missiles_tutorials/warning_receivers.html")
+
+
 	local SensorClass = Menu:AddComboBox()
 	local SensorList = Menu:AddComboBox()
 
 	local Base = Menu:AddCollapsible("#acf.menu.sensors.sensor_info", nil, "icon16/transmit_edit.png")
 	local SensorName = Base:AddTitle()
 	local SensorDesc = Base:AddLabel()
-	local SensorPreview = Base:AddModelPreview(nil, true)
+	local SensorPreview = Base:AddModelPreview(nil, true, "Primary")
 
 	function SensorClass:OnSelect(Index, _, Data)
 		if self.Selected == Data then return end

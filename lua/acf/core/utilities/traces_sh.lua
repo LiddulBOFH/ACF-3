@@ -33,9 +33,14 @@ do -- Visual clip compatibility
 end
 
 do -- ACF.trace
-	-- Automatically filters out and retries when hitting a clipped portion of a prop
 	-- Does NOT modify the original filter
-	local util = util
+	local util           = util
+	local physBoneHavers = {
+		npc_dog            = true,
+		npc_strider        = true,
+		prop_dynamic       = true,
+		prop_vehicle_crane = true,
+	}
 
 	local function DoRecursiveTrace(TraceData)
 		local Output = TraceData.output
@@ -54,7 +59,7 @@ do -- ACF.trace
 	local function TestTraceable(Ent)
 		local EntTbl = Ent:GetTable()
 
-		if EntTbl._IsSpherical then return true end
+		if ACF.FilterMakeSpherical and EntTbl._IsSpherical then return true end
 		if EntTbl.ACF_InvisibleToTrace then return true end
 
 		if EntTbl.ACF_KillableButIndestructible and EntTbl.ACF and EntTbl.ACF.Health <= 0 then
@@ -73,18 +78,46 @@ do -- ACF.trace
 
 		util.TraceLine(TraceData)
 
-		-- Check for clips or to filter this entity
-		if Output.HitNonWorld and (ACF.GlobalFilter[Output.Entity:GetClass()] or TestTraceable(Output.Entity) or ACF.CheckClips(Output.Entity, Output.HitPos)) then
-			local OldFilter = TraceData.filter
-			local Filter    = { Output.Entity }
+		-- TraceData.whitelist = false
 
-			for _, V in ipairs(OldFilter) do Filter[#Filter + 1] = V end
+		if Output.HitNonWorld then
+			if physBoneHavers[Output.Entity:GetClass()] then
+				-- These entities can't be filtered traditionally. Source/Gmod bug.
+				-- Temporarily use a function filter to filter the entity and its bone followers
 
-			TraceData.filter = Filter
+				local HitEntity = Output.Entity
+				local OldFilter = TraceData.filter
 
-			DoRecursiveTrace(TraceData)
+				TraceData.filter = function(ent)
+					if ent == HitEntity then return false end
+					if ent:GetClass() == "phys_bone_follower" then
+						return false
+					end
 
-			TraceData.filter = OldFilter
+					for _, V in ipairs(OldFilter) do
+						if ent == V then return false end
+					end
+
+					return true
+				end
+
+				-- Retry the trace with bone followers filtered
+				util.TraceLine(TraceData)
+
+				-- Restore the original filter
+				TraceData.filter = OldFilter
+			elseif ACF.GlobalFilter[Output.Entity:GetClass()] or TestTraceable(Output.Entity) or ACF.CheckClips(Output.Entity, Output.HitPos) then
+				local OldFilter = TraceData.filter
+				local Filter    = { Output.Entity }
+
+				for _, V in ipairs(OldFilter) do Filter[#Filter + 1] = V end
+
+				TraceData.filter = Filter
+
+				DoRecursiveTrace(TraceData)
+
+				TraceData.filter = OldFilter
+			end
 		end
 
 		if Original then

@@ -60,6 +60,7 @@ CrewTypes.Register("Loader", {
 	Icon		= "icon16/wand.png",
 	Description = "Loaders affect the reload rate of your guns. Link them to gun(s). They prefer standing.",
 	ExtraNotes 	= "Loaders can be linked to any gun, but their focus is split between each. Viewing loaders with the acf menu tool will visualize the space they need for peak performance in purple.",
+	Cost	= 1,
 	LimitConVar	= {			-- ConVar to limit the number of crew members of this type a player can have
 		Name	= "_acf_crew_loader",
 		Amount	= 4,
@@ -102,7 +103,8 @@ CrewTypes.Register("Loader", {
 	UpdateFocus = function(Crew) -- Represents the fraction of efficiency a crew can give to its linked entities
 		local Count = table.Count(Crew.Targets)
 		Crew.Focus = (Count > 0) and (1 / Count) or 1
-	end
+	end,
+	EnforceLimits = function(Crew) ACF.EnforceBaseplateType(Crew, "GroundVehicle") end
 })
 
 CrewTypes.Register("Gunner", {
@@ -110,6 +112,7 @@ CrewTypes.Register("Gunner", {
 	Icon		= "icon16/gun.png",
 	Description = "Gunners affect the accuracy of your gun. Link them to acf turret rings or baseplates. They prefer sitting.",
 	ExtraNotes	= "Gunners can only be linked to one type of gun and their focus does not change.",
+	Cost	= 1,
 	LimitConVar	= {
 		Name	= "_acf_crew_gunner",
 		Amount	= 4,
@@ -152,7 +155,8 @@ CrewTypes.Register("Gunner", {
 	end,
 	UpdateFocus = function(Crew)
 		Crew.Focus = 1
-	end
+	end,
+	EnforceLimits = function(Crew) ACF.EnforceBaseplateType(Crew, "GroundVehicle") end
 })
 
 CrewTypes.Register("Driver", {
@@ -160,6 +164,7 @@ CrewTypes.Register("Driver", {
 	Icon		= "icon16/car.png",
 	Description = "Drivers affect the fuel efficiency of your engines. Link them to acf baseplates. They prefer sitting.",
 	ExtraNotes	= "Drivers can be linked to any engine and their focus does not change.",
+	Cost	= 1,
 	LimitConVar	= {
 		Name	= "_acf_crew_driver",
 		Amount	= 2,
@@ -195,7 +200,8 @@ CrewTypes.Register("Driver", {
 	end,
 	UpdateFocus = function(Crew)
 		Crew.Focus = 1
-	end
+	end,
+	EnforceLimits = function(Crew) ACF.EnforceBaseplateType(Crew, "GroundVehicle") end
 })
 
 CrewTypes.Register("Commander", {
@@ -203,6 +209,7 @@ CrewTypes.Register("Commander", {
 	Icon		= "icon16/medal_gold_1.png",
 	Description = "Commanders coordinate the crew. Works without linking. They prefer sitting.",
 	ExtraNotes 	= "You can link them to work like gunners/loaders to operate a RWS for example. However, this reduces their focus and their ability to command the other crew.",
+	Cost	= 2,
 	LimitConVar	= {
 		Name	= "_acf_crew_commander",
 		Amount	= 1,
@@ -228,17 +235,16 @@ CrewTypes.Register("Commander", {
 	},
 	LinkHandlers = {
 		acf_gun = {
-			OnLink = function(Crew)	Crew.ShouldScan = CheckCount(Crew, "acf_gun") end,
-			OnUnlink = function(Crew) Crew.ShouldScan = CheckCount(Crew, "acf_gun") end,
+			OnLink = function(Crew)	Crew.ShouldScan = CheckCount(Crew, "acf_gun") end, -- If linked to multiple guns
+			OnUnlink = function(Crew) Crew.ShouldScan = CheckCount(Crew, "acf_gun") end, -- If linked to multiple guns
 		},
 		acf_rack = {
-			OnLink = function(Crew)	Crew.ShouldScan = CheckCount(Crew, "acf_rack") end,
-			OnUnlink = function(Crew) Crew.ShouldScan = CheckCount(Crew, "acf_rack") end,
+			OnLink = function(Crew)	Crew.ShouldScan = CheckCount(Crew, "acf_rack") end, -- If linked to multiple racks
+			OnUnlink = function(Crew) Crew.ShouldScan = CheckCount(Crew, "acf_rack") end, -- If linked to multiple racks
 		},
 		acf_turret = {
-			CanLink = function(Crew, Target) -- Called when a crew member tries to link to an entity
-				if CheckCount(Crew) then return false, "Commanders can only link to one entity." end
-				if Target.Turret == "Turret-V" then return false, "Commanders cannot link to vertical drives." end
+			CanLink = function(Crew) -- Called when a crew member tries to link to an entity
+				if CheckCount(Crew, "acf_turret") then return false, "Commanders can only link to one turret." end
 				return true, "Crew linked."
 			end
 		},
@@ -255,7 +261,7 @@ CrewTypes.Register("Commander", {
 		Crew.TotalEff = math.Clamp(MyEff, ACF.CrewFallbackCoef, 1)
 	end,
 	UpdateFocus = function(Crew) -- Represents the fraction of efficiency a crew can give to its linked entities
-		local Contraption = Crew:GetContraption() or {}
+		local Contraption = Crew:CFW_GetContraption() or table_empty
 
 		local AliveCount = -1 -- Excluding the commander
 		for Crew, _ in pairs(Contraption.Crews or table_empty) do
@@ -266,7 +272,8 @@ CrewTypes.Register("Commander", {
 
 		local Count = table.Count(Crew.Targets) + (AliveCount * 1 / ACF.CommanderCapacity) -- 1 to each target, 1/CommanderCapacity to each crew
 		Crew.Focus = (Count > 0) and math.min(1 / Count, 1) or 1
-	end
+	end,
+	EnforceLimits = function(Crew) ACF.EnforceBaseplateType(Crew, "GroundVehicle") end
 })
 
 CrewTypes.Register("Pilot", {
@@ -274,6 +281,7 @@ CrewTypes.Register("Pilot", {
 	Icon		= "icon16/weather_clouds.png",
 	Description = "Pilots can sustain higher G tolerances but weigh more (life support systems and G suits). You should only use these on aircraft.",
 	ExtraNotes 	= "Pilots do not affect anything at the moment.",
+	Cost	= 5,
 	LimitConVar	= {
 		Name	= "_acf_crew_pilot",
 		Amount	= 2,
@@ -282,8 +290,8 @@ CrewTypes.Register("Pilot", {
 	Mass = 200,			-- Pilots weigh more due to life support systems and G suits
 	GForceInfo = {
 		Damages = {
-			Min = 9,	-- Damage starts being applied after this (Gs)
-			Max = 15,	-- Instant death after this (Gs)
+			Min = 6,	-- Damage starts being applied after this (Gs)
+			Max = 12,	-- Instant death after this (Gs)
 		}
 	},
 	LinkHandlers = {
@@ -317,12 +325,5 @@ CrewTypes.Register("Pilot", {
 		local Count = table.Count(Crew.Targets)
 		Crew.Focus = (Count > 0) and (1 / Count) or 1
 	end,
-	EnforceLimits = function(Crew)
-		-- Pilots exclude other crew
-		local Contraption = Crew:GetContraption() or {}
-		local Crews = Contraption.Crews or {}
-		for k in pairs(Crews) do
-			if k.CrewTypeID ~= "Pilot" then k:Remove() end
-		end
-	end
+	EnforceLimits = function(Crew) ACF.EnforceBaseplateType(Crew, "Aircraft") end
 })

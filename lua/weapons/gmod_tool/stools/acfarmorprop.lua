@@ -61,7 +61,9 @@ local function UpdateArmor(_, Entity, Data, BecauseOfDupe)
 	local Area      = Entity.ACF.Area
 	local Ductility = math.Clamp(Data.Ductility or 0, ACF.MinDuctility, ACF.MaxDuctility)
 
+	-- Physical clipping seems to take some time to apply after spawning, so avoid applying armor before that.
 	UpdateValues(Entity, Data, PhysObj, Area, Ductility)
+
 
 	duplicator.ClearEntityModifier(Entity, "ACF_Armor")
 	duplicator.StoreEntityModifier(Entity, "ACF_Armor", { Thickness = Data.Thickness, Ductility = Ductility })
@@ -72,23 +74,6 @@ hook.Add("ACF_OnUpdateServerData", "ACF_ArmorTool_MaxThickness", function(_, Key
 
 	MaximumArmor = math.floor(ACF.CheckNumber(Value, ACF.MaxThickness))
 end)
-
-function TOOL:CheckForReload()
-	local isFirstTimePredicted = IsFirstTimePredicted()
-	if not isFirstTimePredicted then return end
-
-	local Player = self:GetOwner()
-	if Player:KeyPressed(IN_RELOAD) then
-		local Trace = Player:GetEyeTrace()
-
-		local ran = self:GetContraptionReadout(Trace)
-		if ran then
-			-- Get tool entity
-			local Weapon = self.Weapon
-			Weapon:DoShootEffect( Trace.HitPos, Trace.HitNormal, Trace.Entity, Trace.PhysicsBone, isFirstTimePredicted )
-		end
-	end
-end
 
 if CLIENT then
 	local ArmorProp_Area = CreateClientConVar("acfarmorprop_area", 0, false, true) -- we don't want this one to save
@@ -105,7 +90,7 @@ if CLIENT then
 		local Ent = Trace.Entity
 
 		if not IsValid(Ent) then return false end
-		if Ent:IsPlayer() or Ent:IsNPC() then return false end
+		if Ent:IsPlayer() or Ent:IsNPC() or Ent:IsNextBot() then return false end
 		if Ent.GetArmor then return end
 
 		local Weapon = self.Weapon
@@ -330,9 +315,21 @@ else -- Serverside-only stuff
 		self.AimEntity = Ent
 	end
 
+	-- Handle physical clips by applying armor after the physical clip is applied
+	hook.Add("ProperClippingClipAdded", "ACF_ArmorTool_PostClip", function(ClippedEntity, _)
+		timer.Simple(engine.TickInterval(), function()
+			UpdateArmor(_, ClippedEntity, ClippedEntity.EntityMods.ACF_Armor)
+		end)
+	end)
+
+	-- Entry point for duplicator to apply armor settings
 	duplicator.RegisterEntityModifier("ACF_Armor", function(_, Entity, Data)
 		if Entity.IsPrimitive then return end
-		UpdateArmor(_, Entity, Data, true)
+
+		-- Only apply armor if the entity is not being clipped physically (happens in above hook)
+		local EntMods = Entity.EntityMods
+		local ClipMod = EntMods and EntMods.proper_clipping
+		if not ClipMod then	UpdateArmor(_, Entity, Data, true) end
 	end)
 
 	-- Specifically handling Primitives separately so that we can ensure that their stats are not impacted by a race condition
@@ -348,6 +345,7 @@ else -- Serverside-only stuff
 		end
 	end)
 
+	-- Backwards compatibility with deprecated system
 	duplicator.RegisterEntityModifier("acfsettings", function(_, Entity, Data)
 		if CLIENT then return end
 		if not ACF.Check(Entity, true) then return end
@@ -372,7 +370,7 @@ function TOOL:LeftClick(Trace)
 	local Ent = Trace.Entity
 
 	if not IsValid(Ent) then return false end
-	if Ent:IsPlayer() or Ent:IsNPC() then return false end
+	if Ent:IsPlayer() or Ent:IsNPC() or Ent:IsNextBot() then return false end
 	if CLIENT then return true end
 	if not ACF.Check(Ent) then return false end
 
@@ -394,7 +392,7 @@ function TOOL:RightClick(Trace)
 	local Ent = Trace.Entity
 
 	if not IsValid(Ent) then return false end
-	if Ent:IsPlayer() or Ent:IsNPC() then return false end
+	if Ent:IsPlayer() or Ent:IsNPC() or Ent:IsNextBot() then return false end
 	if CLIENT then return true end
 	if not ACF.Check(Ent) then return false end
 
@@ -406,14 +404,27 @@ function TOOL:RightClick(Trace)
 	return true
 end
 
+function TOOL:CheckForReload()
+	local isFirstTimePredicted = IsFirstTimePredicted()
+	if not isFirstTimePredicted then return end
+
+	local Player = self:GetOwner()
+	if Player:KeyPressed(IN_RELOAD) then
+		local Trace = Player:GetEyeTrace()
+
+		local ran = self:GetContraptionReadout(Trace, Player:KeyDown(IN_SPEED))
+		if ran then
+			-- Get tool entity
+			local Weapon = self.Weapon
+			Weapon:DoShootEffect( Trace.HitPos, Trace.HitNormal, Trace.Entity, Trace.PhysicsBone, isFirstTimePredicted )
+		end
+	end
+end
+
+
 do -- Armor readout
 	local Contraption = ACF.Contraption
 	local Messages    = ACF.Utilities.Messages
-
-	local Text1 = "--- Contraption Readout (Owner: %s) ---"
-	local Text2 = "Mass: %s kg total | %s kg physical (%s%%) | %s kg parented"
-	local Text3 = "Mobility: %s hp/ton @ %s hp | %s liters of fuel"
-	local Text4 = "Entities: %s (%s physical, %s parented, %s other entities) | %s constraints"
 
 	-- Emulates the stuff done by ACF.CalcMassRatio except with a given set of entities
 	local function ProcessList(Entities)
@@ -437,7 +448,7 @@ do -- Armor readout
 				if not Ent:IsWeapon() then -- We don't want to count weapon entities
 					OtherNum = OtherNum + 1
 				end
-			elseif not (Ent:IsPlayer() or Ent:IsNPC()) then -- These will pass the ACF check, but we don't want them either
+			elseif not (Ent:IsPlayer() or Ent:IsNPC() or Ent:IsNextBot()) then -- These will pass the ACF check, but we don't want them either
 				local Owner   = Ent:CPPIGetOwner() or game.GetWorld()
 				local PhysObj = Ent.ACF.PhysObj
 				local Class   = Ent:GetClass()
@@ -500,7 +511,7 @@ do -- Armor readout
 				local Ent = Trace.Entity
 
 				if not IsValid(Ent) then return false end
-				if Ent:IsPlayer() or Ent:IsNPC() then return false end
+				if Ent:IsPlayer() or Ent:IsNPC() or Ent:IsNextBot() then return false end
 
 				return true
 			end,
@@ -509,6 +520,16 @@ do -- Armor readout
 				local Power, Fuel, PhysNum, ParNum, ConNum, Name, OtherNum = Contraption.CalcMassRatio(Ent, true)
 
 				return Power, Fuel, PhysNum, ParNum, ConNum, Name, OtherNum, Ent.acftotal, Ent.acfphystotal
+			end,
+			GetCost = function(_, Trace)
+				if not IsValid(Trace.Entity) then return 0, {} end
+
+				local Contraption_ = Trace.Entity:CFW_GetContraption()
+				if Contraption_ then
+					return Contraption.CostSystem.CalcCostsFromContraption(Contraption_)
+				else
+					return Contraption.CostSystem.CalcCostsFromEnts({Trace.Entity})
+				end
 			end
 		},
 		Sphere = {
@@ -519,6 +540,10 @@ do -- Armor readout
 				local Ents = ents.FindInSphere(Trace.HitPos, Tool:GetClientNumber("sphere_radius"))
 
 				return ProcessList(Ents)
+			end,
+			GetCost = function(Tool, Trace)
+				local Ents = ents.FindInSphere(Trace.HitPos, Tool:GetClientNumber("sphere_radius"))
+				return Contraption.CostSystem.CalcCostsFromEnts(Ents)
 			end
 		}
 	}
@@ -529,23 +554,56 @@ do -- Armor readout
 		return Modes.Default
 	end
 
+	local Text1 = "--- Contraption Readout (Owner: %s) ---"
+	local Text2 = "Mass: %s kg total | %s kg physical (%s%%) | %s kg parented"
+	local Text3 = "Mobility: %s hp/ton @ %s hp | %s liters of fuel"
+	local Text4 = "Entities: %s (%s physical, %s parented, %s other entities) | %s constraints"
+	local Text5 = "Name: %s | Type: %s"
+	local Text6 = "Cost: %s | Ammo: %s | Max Nominal: %s mm"
+
 	-- Total up mass of constrained ents
-	function TOOL:GetContraptionReadout(Trace)
+	function TOOL:GetContraptionReadout(Trace, UseCostBreakdown)
 		local Mode = GetReadoutMode(self)
 
 		if not Mode.CanCheck(self, Trace) then return false end
 		if CLIENT then return true end
 
-		local Power, Fuel, PhysNum, ParNum, ConNum, Name, OtherNum, Total, PhysTotal = Mode.GetResult(self, Trace)
-		local HorsePower = math.Round(Power / math.max(Total * 0.001, 0.001), 1)
-		local PhysRatio = math.Round(100 * PhysTotal / math.max(Total, 0.001))
-		local ParentTotal = Total - PhysTotal
-		local Player = self:GetOwner()
+		local Cost, Breakdown = Mode.GetCost(self, Trace)
+		if UseCostBreakdown then
+			local Player = self:GetOwner()
 
-		Messages.SendChat(Player, nil, Text1:format(Name))
-		Messages.SendChat(Player, nil, Text2:format(math.Round(Total, 2), math.Round(PhysTotal, 2), PhysRatio, math.Round(ParentTotal, 2)))
-		Messages.SendChat(Player, nil, Text3:format(HorsePower, math.Round(Power), math.Round(Fuel)))
-		Messages.SendChat(Player, nil, Text4:format(PhysNum + ParNum + OtherNum, PhysNum, ParNum, OtherNum, ConNum))
+			local NiceBreakdown = {}
+			for item, cost in pairs(Breakdown) do
+				table.insert(NiceBreakdown, {name = item, cost = cost})
+			end
+
+			table.sort(NiceBreakdown, function(a, b)
+				return a.cost > b.cost
+			end)
+
+			Messages.SendChat(Player, nil, "--- Contraption Cost Breakdown ---")
+
+			for _, Item in ipairs(NiceBreakdown) do
+				Messages.SendChat(Player, nil, "| " .. Item.name .. ": " .. math.Round(Item.cost, 2))
+			end
+
+			Messages.SendChat(Player, nil, "TOTAL COST: ", math.Round(Cost, 2))
+		else
+			local Power, Fuel, PhysNum, ParNum, ConNum, Name, OtherNum, Total, PhysTotal = Mode.GetResult(self, Trace)
+			local HorsePower = math.Round(Power / math.max(Total * 0.001, 0.001), 1)
+			local PhysRatio = math.Round(100 * PhysTotal / math.max(Total, 0.001))
+			local ParentTotal = Total - PhysTotal
+			local Player = self:GetOwner()
+			local BaseplateName, BaseplateType, AmmoTypes, MaxNominal = Contraption.GetMiscInfo(Trace.Entity)
+			local AmmoList = next(AmmoTypes) and table.concat(AmmoTypes, ", ") or "N/A"
+
+			Messages.SendChat(Player, nil, Text1:format(Name))
+			Messages.SendChat(Player, nil, Text2:format(math.Round(Total, 2), math.Round(PhysTotal, 2), PhysRatio, math.Round(ParentTotal, 2)))
+			Messages.SendChat(Player, nil, Text3:format(HorsePower, math.Round(Power), math.Round(Fuel)))
+			Messages.SendChat(Player, nil, Text4:format(PhysNum + ParNum + OtherNum, PhysNum, ParNum, OtherNum, ConNum))
+			Messages.SendChat(Player, nil, Text5:format(BaseplateName, BaseplateType))
+			Messages.SendChat(Player, nil, Text6:format(math.Round(Cost, 2), AmmoList, math.Round(MaxNominal, 2)))
+		end
 
 		return true
 	end

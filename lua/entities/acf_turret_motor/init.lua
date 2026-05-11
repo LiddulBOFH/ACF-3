@@ -131,12 +131,10 @@ do	-- Spawn and Update funcs
 
 		HookRun("ACF_OnSpawnEntity", "acf_turret_motor", Entity, Data, Class, Motor)
 
-		ACF.CheckLegal(Entity)
-
 		return Entity
 	end
 
-	Entities.Register("acf_turret_motor", ACF.MakeTurretMotor, "Motor", "CompSize")
+	Entities.Register("acf_turret_motor", ACF.MakeTurretMotor, "Motor", "CompSize", "Teeth")
 
 	function ENT:Update(Data)
 		VerifyData(Data)
@@ -170,24 +168,20 @@ end
 
 do	-- Metamethods and other important stuff
 	do
-		local Text = "%s\n\nTorque: %G Nm\nTeeth: %G t"
-
-		function ENT:UpdateOverlayText()
-			local Status = ""
-
+		function ENT:ACF_UpdateOverlayState(State)
 			if IsValid(self.Turret) then
 				if self.Active then
-					Status = "Active"
+					State:AddKeyValue("Status", "Active")
 				else
-					Status = self.InactiveReason
+					State:AddError("Status: " .. self.InactiveReason)
 				end
-
-				Status = Status .. "\nLinked to " .. tostring(self.Turret)
+				State:AddKeyValue("Linked to", tostring(self.Turret))
 			else
-				Status = "Inactive: Not linked to a turret drive!"
+				State:AddError("Inactive: Not linked to a turret drive!")
 			end
 
-			return Text:format(Status, self.Torque, self.Teeth)
+			State:AddKeyValue("Torque", ("%G Nm"):format(self.Torque))
+			State:AddKeyValue("Gear Teeth", ("%G t"):format(self.Teeth))
 		end
 	end
 
@@ -291,6 +285,10 @@ do	-- Metamethods and other important stuff
 
 			if self.Active == false then self:SetActive(true, "") end
 			return true
+		end
+
+		function ENT:GetCost()
+			return self.CompSize * 2
 		end
 
 		function ENT:GetInfo()

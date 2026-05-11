@@ -8,7 +8,8 @@ function Ammo:OnLoaded()
 
 	self.Name		 = "High Explosive"
 	self.SpawnIcon   = "acf/icons/shell_he.png"
-	self.Model		 = "models/munitions/round_100mm_shot.mdl"
+	self.Bodygroup   = 5 -- HE bodygroup index
+	self.MortarBodygroup = 0 -- HE mortar submodel
 	self.Description = "#acf.descs.ammo.he"
 	self.Blacklist = {
 		MG = true,
@@ -65,7 +66,7 @@ function Ammo:BaseConvert(ToolData)
 	Data.LimitVel		= 100 --Most efficient penetration speed in m/s
 	Data.Ricochet		= 60 --Base ricochet angle
 	Data.DetonatorAngle	= 80
-	Data.CanFuze		= Data.Caliber * 10 > ACF.MinFuzeCaliber -- Can fuze on calibers > 20mm
+	Data.CanFuze		= Data.Caliber * 10 >= ACF.MinFuzeCaliber -- Can fuze on calibers > 20mm
 
 	self:UpdateRoundData(ToolData, Data, GUIData)
 
@@ -74,6 +75,11 @@ end
 
 if SERVER then
 	local Ballistics = ACF.Ballistics
+	local Conversion	= ACF.PointConversion
+
+	function Ammo:GetCost(BulletData)
+		return ((BulletData.ProjMass - BulletData.FillerMass) * Conversion.Steel) + (BulletData.PropMass * Conversion.Propellant) + (BulletData.FillerMass * Conversion.CompB)
+	end
 
 	function Ammo:Network(Entity, BulletData)
 		Ammo.BaseClass.Network(self, Entity, BulletData)
@@ -81,11 +87,11 @@ if SERVER then
 		Entity:SetNW2String("AmmoType", "HE")
 	end
 
-	function Ammo:GetCrateText(BulletData)
-		local Text = "Muzzle Velocity: %s m/s\nBlast Radius: %s m\nBlast Energy: %s KJ"
+	function Ammo:UpdateCrateOverlay(BulletData, State)
 		local Data = self:GetDisplayData(BulletData)
-
-		return Text:format(math.Round(BulletData.MuzzleVel, 2), math.Round(Data.BlastRadius, 2), math.Round(BulletData.FillerMass * ACF.HEPower, 2))
+		State:AddNumber("Muzzle Velocity", BulletData.MuzzleVel, " m/s")
+		State:AddNumber("Blast Radius", Data.BlastRadius, " m")
+		State:AddNumber("Blast Energy", BulletData.FillerMass * ACF.HEPower, " kJ")
 	end
 
 	function Ammo:PropImpact(Bullet, Trace)

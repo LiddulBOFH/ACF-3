@@ -33,27 +33,8 @@ Weapons.Register("MO", {
 			{Name = "Breech", LPos = Vector(-97.4919, 0, 0.015625), LAng = Angle(0, 0, 0), Width = 11.023622047244, Height = 11.023622047244},
 			{Name = "Barrel", LPos = Vector(37.0706, 0, 0.015625), LAng = Angle(180, 0, 0), Width = 11.023622047244, Height = 11.023622047244},
 		}
-	}
-})
-
-Weapons.RegisterItem("60mmM", "MO", {
-	Caliber = 60,
-})
-
-Weapons.RegisterItem("80mmM", "MO", {
-	Caliber = 80,
-})
-
-Weapons.RegisterItem("120mmM", "MO", {
-	Caliber = 120,
-})
-
-Weapons.RegisterItem("150mmM", "MO", {
-	Caliber = 150,
-})
-
-Weapons.RegisterItem("200mmM", "MO", {
-	Caliber = 200,
+	},
+	CostScalar	= 0.35
 })
 
 ACF.SetCustomAttachment("models/mortar/mortar_120mm.mdl", "muzzle", Vector(24.02), Angle(0, 0, 90))

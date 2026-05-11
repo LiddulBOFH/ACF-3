@@ -13,6 +13,7 @@ TOOL.Information = {
 }
 
 local Sounds = ACF.SoundToolSupport
+local Notify = ACF.Utilities.Notify
 
 local function ReplaceSound(_, Entity, Data)
 	if not IsValid(Entity) then return end
@@ -41,9 +42,9 @@ local function IsReallyValid(trace, ply)
 
 	if not ACF.SoundToolSupport[class] then
 		if SERVER and string.StartWith(class, "acf_") then
-			ACF.SendNotify(ply, false, "#tool.acfsound.unsupported_class")
+			Notify.EntityWarningToPlayer(trace.Entity, ply, "#tool.acfsound.unsupported_class")
 		elseif SERVER then
-			ACF.SendNotify(ply, false, "#tool.acfsound.unsupported_ent")
+			Notify.EntityWarningToPlayer(trace.Entity, ply, "#tool.acfsound.unsupported_ent")
 		end
 
 		return false

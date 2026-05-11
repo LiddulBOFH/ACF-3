@@ -1,4 +1,4 @@
--- Contraption-aware functionality
+	-- Contraption-aware functionality
 
 local ACF = ACF
 local Contraption = ACF.Contraption
@@ -87,7 +87,7 @@ function Contraption.GetAllChildren(Ent, Tab)
 end
 
 function Contraption.GetEnts(Ent)
-	local Con      = Ent:GetContraption()
+	local Con      = Ent:CFW_GetContraption()
 	local ConEnts  = Con and Con.ents or {[Ent] = true}
 	local Children = Ent:GetFamilyChildren()
 	local Phys     = {}
@@ -126,7 +126,7 @@ function Contraption.HasConstraints(Ent)
 end
 
 function Contraption.CalcMassRatio(Ent, Tally)
-	local Con      = Ent:GetContraption()
+	local Con      = Ent:CFW_GetContraption()
 	local PhysMass = 0
 	local Time     = CurTime()
 
@@ -138,7 +138,7 @@ function Contraption.CalcMassRatio(Ent, Tally)
 	local OthN  = 0
 	local ConN	= 0
 
-	local EntContraption = Ent:GetContraption()
+	local EntContraption = Ent:CFW_GetContraption()
 	local Physical, Parented, Detached
 	if EntContraption then
 		Physical, Parented, Detached = Contraption.GetEnts(Ent)
@@ -234,6 +234,17 @@ function Contraption.CalcMassRatio(Ent, Tally)
 
 		return Power, Fuel, PhysN, ParN, ConN, IsValid(Owner) and Owner:Name() or "Unknown", OthN, TotMass, PhysMass
 	end
+end
+
+function Contraption.GetMiscInfo(Ent)
+	local Contraption = Ent:CFW_GetContraption()
+	if not Contraption then return "N/A", "N/A", {}, 0 end
+
+	local Name = Contraption.ACF_Baseplate and Contraption.ACF_Baseplate:GetNWString("WireName") or "N/A"
+	local BaseplateType = Contraption.ACF_Baseplate and Contraption.ACF_Baseplate:ACF_GetUserVar("BaseplateType").Name or "N/A"
+	local AmmoTypes = table.GetKeys(Contraption.AmmoTypes or {}) or {}
+	local MaxNominal = Contraption.MaxNominal or 0
+	return Name, BaseplateType, AmmoTypes, MaxNominal
 end
 
 do -- ASSUMING DIRECT CONTROL
@@ -341,11 +352,12 @@ do -- ASSUMING DIRECT CONTROL
 			end
 
 			function ENT:SetModel(Model)
-				-- MARCH: Just a notice - if you get "attempt to index field ACF (a nil value)" issues here,
-				-- DON'T just add a if self.ACF check - this is intended to be called on ACF entities
-				-- and they should have an ACF table, so you're just suppressing an issue here, only for it to
-				-- probably show up later... do more investigation into *why* self.ACF returned nil.
-				if self.IsACFEntity then Contraption.SetModel(self, self.ACF.Model) return end
+				if self.IsACFEntity and self.ACF and self.ACF.Model then
+					-- Only enforce model if the entity has been initialized by ACF
+					-- ents.Create("acf_ammo") doesn't set ent.ACF, for example
+					Contraption.SetModel(self, self.ACF.Model)
+					return
+				end
 
 				SetModel(self, Model)
 			end

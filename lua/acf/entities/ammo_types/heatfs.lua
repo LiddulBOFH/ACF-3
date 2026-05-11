@@ -8,16 +8,17 @@ function Ammo:OnLoaded()
 
 	self.Name		 = "High Explosive Anti-Tank Fin Stabilized"
 	self.SpawnIcon   = "acf/icons/shell_heatfs.png"
+	self.Bodygroup   = 9 -- HEATFS bodygroup index
 	self.Description = "#acf.descs.ammo.heatfs"
 	self.Blacklist = ACF.GetWeaponBlacklist({
 		C = true,
 		M = true,
 		AL = true,
 		HW = true,
-		SC = true,
+		SC = true
 	})
 
-	self.MaxStandoffRatio = .75
+	self.MaxStandoffRatio = 0.75
 end
 
 function Ammo:UpdateRoundData(ToolData, Data, GUIData)
@@ -117,6 +118,12 @@ function Ammo:UpdateRoundData(ToolData, Data, GUIData)
 end
 
 if SERVER then
+	local Conversion	= ACF.PointConversion
+
+	function Ammo:GetCost(BulletData)
+		return (BulletData.CasingMass * Conversion.Steel) + (BulletData.PropMass * Conversion.Propellant) + (BulletData.FillerMass * Conversion.Octol) + (BulletData.LinerMass * Conversion.Copper)
+	end
+
 	function Ammo:Network(Entity, BulletData)
 		Ammo.BaseClass.Network(self, Entity, BulletData)
 

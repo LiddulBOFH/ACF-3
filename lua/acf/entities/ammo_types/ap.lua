@@ -7,11 +7,121 @@ local Ammo      = AmmoTypes.Register("AP")
 function Ammo:OnLoaded()
 	self.Name		 = "Armor Piercing"
 	self.SpawnIcon   = "acf/icons/shell_ap.png"
-	self.Model		 = "models/munitions/round_100mm_ap_shot.mdl"
 	self.Description = "#acf.descs.ammo.ap"
 	self.Blacklist = {
 		GL = true,
+		MO = true,
 		SL = true,
+	}
+
+	-- Model definitions (FlightModel defaults to MenuModel, MenuModel defaults to CrateModel)
+	self.CrateModel  = "models/acf/munitions/cartridge.mdl"
+	self.MenuModel   = "models/acf/munitions/projectile.mdl"
+	self.Bodygroup   = 0 -- Bodygroup index for crate and menu models
+	self.MenuFOV     = 60 -- Default FOV for menu preview
+end
+
+--- Default crate model path - used to detect ammo types with custom models
+local DefaultCrateModel = "models/acf/munitions/cartridge.mdl"
+
+--- Resolves the model to use for a given context.
+--- Precedence: Weapon Round definition > Ammo type custom model > Mortar override > Default ammo model
+--- @param Context string The context: "Crate", "Menu", or "Flight"
+--- @param Class table|nil The weapon class
+--- @param Weapon table|nil The specific weapon entry
+--- @return table|nil ModelInfo Table with Model, Offset, Bodygroup, NeedsRotation, FOV
+function Ammo:ResolveModel(Context, Class, Weapon)
+	local Round = Weapon and Weapon.Round or (Class and Class.Round)
+
+	-- Priority 1: Weapon's Round definition (missiles, bombs, etc.)
+	if Round and (Round.Model or Round.RackModel) then
+		local ModelPath = (not Round.IgnoreRackModel and Round.RackModel) or Round.Model
+
+		if ModelPath then
+			local ModelData = ACF.ModelData.GetModelData(ModelPath)
+			local Offset = ModelData and ModelData.Center and Vector(-ModelData.Center.x, 0, 0) or Vector()
+
+			return {
+				Model         = ModelPath,
+				Offset        = Offset,
+				Bodygroup     = 0,
+				NeedsRotation = false,
+				FOV           = 60,
+			}
+		end
+	end
+
+	-- Priority 2: Ammo type's custom model (e.g., GLATGM missiles)
+	-- If the ammo type defines a non-default CrateModel, use it instead of mortar override
+	local HasCustomModel = self.CrateModel and self.CrateModel ~= DefaultCrateModel
+
+	if HasCustomModel then
+		-- Ammo type has a custom CrateModel (e.g., GLATGM missile)
+		-- Use the custom model for all contexts, ignoring inherited MenuModel
+		local ModelPath, Bodygroup
+		if Context == "Flight" then
+			ModelPath = self.FlightModel or self.CrateModel
+			Bodygroup = self.FlightBodygroup or self.Bodygroup
+		else -- "Menu" or "Crate"
+			ModelPath = self.CrateModel
+			Bodygroup = self.Bodygroup
+		end
+
+		local ModelData = ACF.ModelData.GetModelData(ModelPath)
+		local Offset    = ModelData.Center and Vector(-ModelData.Center.x, 0, 0) or Vector()
+
+		return {
+			Model         = ModelPath,
+			Offset        = Offset,
+			Bodygroup     = Bodygroup,
+			NeedsRotation = false,
+			FOV           = self.MenuFOV,
+		}
+	end
+
+	-- Priority 3: Mortars have a different model
+	local IsMortar = Class and Class.ID == "MO"
+	local MortarBodygroup = self.MortarBodygroup
+
+	if IsMortar and MortarBodygroup then
+		local ModelPath = "models/acf/munitions/projectile_mortar.mdl"
+		local ModelData = ACF.ModelData.GetModelData(ModelPath)
+		local Offset    = ModelData.Center and Vector(-ModelData.Center.x, 0, 0) or Vector()
+
+		return {
+			Model         = ModelPath,
+			Offset        = Offset,
+			Bodygroup     = MortarBodygroup,
+			NeedsRotation = false,
+			FOV           = 105,
+		}
+	end
+
+	-- Priority 4: Default ammo type model based on context
+	local ModelPath, Bodygroup
+	if Context == "Menu" then
+		ModelPath = self.MenuModel or self.CrateModel
+		Bodygroup = self.Bodygroup
+	elseif Context == "Flight" then
+		ModelPath = self.FlightModel or self.MenuModel or self.CrateModel
+		Bodygroup = self.FlightBodygroup or self.Bodygroup
+	else -- "Crate" or default
+		ModelPath = self.CrateModel
+		Bodygroup = self.Bodygroup
+	end
+
+	if not ModelPath then return nil end
+
+	local ModelData = ACF.ModelData.GetModelData(ModelPath)
+	local Offset = ModelData.Center and Vector(-ModelData.Center.x, 0, 0) or Vector()
+	local NeedsRotation = ModelPath == DefaultCrateModel
+
+	return {
+		Model         = ModelPath,
+		Offset        = Offset,
+		Bodygroup     = Bodygroup,
+		NeedsRotation = NeedsRotation,
+		FOV           = self.MenuFOV,
 	}
 end
 
@@ -81,6 +191,7 @@ end
 if SERVER then
 	local Ballistics = ACF.Ballistics
 	local Entities   = Classes.Entities
+	local Conversion	= ACF.PointConversion
 
 	Entities.AddArguments("acf_ammo", "Projectile", "Propellant", "Tracer") -- Adding extra info to ammo crates
 
@@ -112,21 +223,31 @@ if SERVER then
 
 	function Ammo:Network(Entity, BulletData)
 		Entity:SetNW2String("AmmoType", "AP")
-		Entity:SetNW2Float("Caliber", BulletData.Caliber)
+		Entity:SetNW2Float("Caliber", BulletData.Diameter)
 		Entity:SetNW2Float("ProjMass", BulletData.ProjMass)
 		Entity:SetNW2Float("PropMass", BulletData.PropMass)
 		Entity:SetNW2Float("DragCoef", BulletData.DragCoef)
 		Entity:SetNW2Float("Tracer", BulletData.Tracer)
+
+		-- Network flight model info for bullet effects
+		local FlightInfo = self:ResolveModel("Flight")
+		if FlightInfo then
+			Entity:SetNW2String("FlightModel", FlightInfo.Model)
+			Entity:SetNW2Int("FlightBodygroup", FlightInfo.Bodygroup)
+		end
 	end
 
 	function Ammo:GetCrateName()
 	end
 
-	function Ammo:GetCrateText(BulletData)
+	function Ammo:UpdateCrateOverlay(BulletData, State)
 		local Data = self:GetDisplayData(BulletData)
-		local Text = "Muzzle Velocity: %s m/s\nMax Penetration: %s mm"
+		State:AddNumber("Muzzle Velocity", BulletData.MuzzleVel, " m/s")
+		State:AddNumber("Max Penetration", Data.MaxPen, " mm")
+	end
 
-		return Text:format(math.Round(BulletData.MuzzleVel, 2), math.Round(Data.MaxPen, 2))
+	function Ammo:GetCost(BulletData)
+		return (BulletData.ProjMass * Conversion.Steel) + (BulletData.PropMass * Conversion.Propellant)
 	end
 
 	function Ammo:PropImpact(Bullet, Trace)
@@ -199,9 +320,18 @@ else
 		return math.Round(self:GetPenetration(Bullet, Speed), 2), math.Round(Speed, 2)
 	end
 
-	function Ammo:OnCreateAmmoPreview(_, Setup)
-		Setup.Model = self.Model
-		Setup.FOV   = 60
+	function Ammo:OnCreateAmmoPreview(_, Setup, ToolData)
+		local Destiny = Classes[ToolData.Destiny or "Weapons"]
+		local Class = Classes.GetGroup(Destiny, ToolData.Weapon)
+		local Weapon = Destiny and Destiny.GetItem and Destiny.GetItem(Class and Class.ID, ToolData.Weapon)
+
+		local Info = self:ResolveModel("Menu", Class, Weapon)
+
+		if Info then
+			Setup.Model     = Info.Model
+			Setup.Bodygroup = Info.Bodygroup
+			Setup.FOV       = Info.FOV
+		end
 	end
 
 	function Ammo:ImpactEffect(_, Bullet)
@@ -263,13 +393,13 @@ else
 			return Text:format(MuzzleVel, ProjMass, PropMass)
 		end)
 
-		local MaxPen = Base:AddLabel()
-		MaxPen:TrackClientData("Projectile", "SetText")
-		MaxPen:TrackClientData("Propellant")
-		MaxPen:TrackClientData("FillerRatio")
-		MaxPen:DefineSetter(function()
-			local Text		= language.GetPhrase("acf.menu.ammo.pen_stats_ap")
-			local MaxPen	= math.Round(BulletData.MaxPen, 2)
+		local MaxPenLabel = Base:AddLabel()
+		MaxPenLabel:TrackClientData("Projectile", "SetText")
+		MaxPenLabel:TrackClientData("Propellant")
+		MaxPenLabel:TrackClientData("FillerRatio")
+		MaxPenLabel:DefineSetter(function()
+			local Text   = language.GetPhrase("acf.menu.ammo.pen_stats_ap")
+			local MaxPen = math.Round(BulletData.MaxPen, 2)
 			return Text:format(MaxPen)
 		end)
 	end

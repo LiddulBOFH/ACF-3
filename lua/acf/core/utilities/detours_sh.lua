@@ -1,6 +1,9 @@
-ACF.Detours = ACF.Detours or {}
+local ParentTableName = "ACF"
+local ParentTable = _G[ParentTableName]
 
-local Detours = ACF.Detours
+ParentTable.Detours = ParentTable.Detours or {}
+
+local Detours = ParentTable.Detours
 Detours.Storage = Detours.Storage or {}
 
 local Storage = Detours.Storage
@@ -10,9 +13,11 @@ function Detours.New(Expression, Hook)
     local Getter = CompileString("return function() return " .. Expression .. " end")()
     local Setter = CompileString("return function(value) " .. Expression .. " = value end")()
 
+    if not Getter or not Setter then ErrorNoHaltWithStack("Bad expression '" .. Expression .. "'") return end
+
     if not Storage[Expression] then
-        local f = Getter()
-        if not f then error("Bad expression '" .. Expression .. "'") end
+        local ok, f = pcall(Getter)
+        if not ok then ErrorNoHaltWithStack("Bad expression '" .. Expression .. "': " .. tostring(f)) return end
         Storage[Expression] = f
     end
 
@@ -78,9 +83,7 @@ end
 function Detours.SENT(ClassName, MethodName, Hook)
     return Detours.New("scripted_ents.GetStored(\"" .. ClassName .. "\").t." .. MethodName, Hook)
 end
-function Detours.Expression2(E2HelperSig, Hook)
-    return Detours.New("wire_expression2_funcs[ACF.Detours.E2HelperSignatureToBaseSignature(\"" .. E2HelperSig .. "\")][3]", Hook)
-end
+
 function Detours.Hook(HookName, UniqueName, Hook)
     return Detours.New("hook.GetTable[\"" .. HookName .. "\"][\"" .. UniqueName .. "\"]", Hook)
 end
@@ -88,7 +91,26 @@ function Detours.Metatable(MetatableName, FunctionName, Hook)
     return Detours.New("FindMetaTable(\"" .. MetatableName .. "\")[\"" .. FunctionName .. "\"]", Hook)
 end
 function Detours.WireGate(GateName, Hook)
-    return Detours.New("GateActions[\"" .. GateName .. "\"]", Hook)
+    return Detours.New("GateActions[\"" .. GateName .. "\"].output", Hook)
+end
+
+local E2Detours = {}
+function Detours.Expression2(E2HelperSig, Hook)
+    local Signature = "(wire_expression2_funcs[" .. ParentTableName .. ".Detours.E2HelperSignatureToBaseSignature(\"" .. E2HelperSig .. "\")] or {})[3]"
+    local Obj = E2Detours[Signature]
+    if not Obj then
+        Obj = {
+            -- Try getting the original now
+            Hook = Hook
+        }
+        E2Detours[Signature] = Obj
+    else
+        Obj.Hook = Hook
+    end
+
+    return function(...)
+        return Obj.Original(...)
+    end
 end
 
 -- Starfall is a bit more annoying about this...
@@ -111,33 +133,42 @@ function Detours.Starfall(Expression, Hook)
     end
 end
 
-timer.Simple(1, function()
-    if not SF then return end -- Starfall isn't on the server :(
-
-    local function PatchInstance(Instance)
-        for _, HookMethods in pairs(SFDetours) do
-            local Getter, Setter, Hook = HookMethods.Getter, HookMethods.Setter, HookMethods.Hook
-            HookMethods.Original[Instance] = Getter(Instance)
-            local function NewHook(...)
-                Hook(Instance, ...)
-            end
-            Setter(Instance, NewHook)
-        end
+local function PatchExpression2Funcs()
+    for Sig, Obj in pairs(E2Detours) do
+        Storage[Sig] = nil
+        Obj.Original = Detours.New(Sig, Obj.Hook)
     end
+end
 
-    local OriginalCompile OriginalCompile = Detours.New("SF.Instance.Compile", function(...)
-        local OK, Instance = OriginalCompile(...)
-        if OK then
+hook.Add("Expression2_PostLoadExtensions", ParentTableName .. "_Detours_AfterExpression2Loaded", PatchExpression2Funcs)
+
+timer.Simple(1, function()
+    if SF then
+        local function PatchInstance(Instance)
+            hook.Run(ParentTableName .. "Detours_Starfall_PrePatchInstance", Instance)
+            for _, HookMethods in pairs(SFDetours) do
+                local Getter, Setter, Hook = HookMethods.Getter, HookMethods.Setter, HookMethods.Hook
+                HookMethods.Original[Instance] = Getter(Instance)
+                local function NewHook(...)
+                    Hook(Instance, ...)
+                end
+                Setter(Instance, NewHook)
+            end
+        end
+
+        local OriginalCompile OriginalCompile = Detours.New("SF.Instance.Compile", function(...)
+            local OK, Instance = OriginalCompile(...)
+            if OK then
+                PatchInstance(Instance)
+            end
+            return OK, Instance
+        end)
+
+        for Instance, _ in pairs(SF.allInstances) do
             PatchInstance(Instance)
         end
-        return OK, Instance
-    end)
-
-    for Instance, _ in pairs(SF.allInstances) do
-        PatchInstance(Instance)
     end
 end)
-
 
 -- Some examples of this library
 --[[
@@ -150,9 +181,9 @@ end)
 -- Expression 2 Function Detour
     local E2ApplyForce_Orig E2ApplyForce_Orig = Detours.Expression2("e:applyForce(v)", function(scope, args, ...)
         local ent = args[1]
-        local contraption = ent:GetContraption()
-        print(contraption, contraption.Base)
-        if contraption and contraption.Base then
+        local contraption = ent:CFW_GetContraption()
+        print(contraption, contraption.ACF_Baseplate)
+        if contraption and contraption.ACF_Baseplate then
             return ent:CPPIGetOwner():Kill()
         end
 

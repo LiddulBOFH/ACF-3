@@ -4,14 +4,15 @@ local Damage    = ACF.Damage
 local Debug		= ACF.Debug
 local AmmoTypes = Classes.AmmoTypes
 local Ammo      = AmmoTypes.Register("HEAT", "AP")
-
+local Clock 	= ACF.Utilities.Clock
 
 function Ammo:OnLoaded()
 	Ammo.BaseClass.OnLoaded(self)
 
 	self.Name		 = "High Explosive Anti-Tank"
 	self.SpawnIcon   = "acf/icons/shell_heat.png"
-	self.Model		 = "models/munitions/round_100mm_shot.mdl"
+	self.Bodygroup   = 8 -- HEAT bodygroup index
+	self.MortarBodygroup = 3 -- HEAT mortar submodel
 	self.Description = "#acf.descs.ammo.heat"
 	self.Blacklist = {
 		AC = true,
@@ -182,7 +183,7 @@ function Ammo:BaseConvert(ToolData)
 	Data.LimitVel		= 100 -- Most efficient penetration speed in m/s
 	Data.Ricochet		= 60 -- Base ricochet angle
 	Data.DetonatorAngle	= 75
-	Data.CanFuze		= Data.Caliber * 10 > ACF.MinFuzeCaliber -- Can fuze on calibers > 20mm
+	Data.CanFuze		= Data.Caliber * 10 >= ACF.MinFuzeCaliber -- Can fuze on calibers > 20mm
 
 	self:UpdateRoundData(ToolData, Data, GUIData)
 
@@ -207,8 +208,13 @@ if SERVER then
 	local Ballistics = ACF.Ballistics
 	local Entities   = Classes.Entities
 	local Objects    = Damage.Objects
+	local Conversion	= ACF.PointConversion
 
 	Entities.AddArguments("acf_ammo", "LinerAngle", "StandoffRatio") -- Adding extra info to ammo crates
+
+	function Ammo:GetCost(BulletData)
+		return (BulletData.CasingMass * Conversion.Steel) + (BulletData.PropMass * Conversion.Propellant) + (BulletData.FillerMass * Conversion.CompB) + (BulletData.LinerMass * Conversion.Copper)
+	end
 
 	function Ammo:OnLast(Entity)
 		Ammo.BaseClass.OnLast(self, Entity)
@@ -230,11 +236,12 @@ if SERVER then
 		Entity:SetNW2Float("FillerMass", BulletData.BoomFillerMass)
 	end
 
-	function Ammo:GetCrateText(BulletData)
-		local Text = "Muzzle Velocity: %s m/s\nMax Penetration: %s mm\nBlast Radius: %s m\n", "Blast Energy: %s KJ"
+	function Ammo:UpdateCrateOverlay(BulletData, State)
 		local Data = self:GetDisplayData(BulletData)
-
-		return Text:format(math.Round(BulletData.MuzzleVel, 2), math.Round(Data.MaxPen, 2), math.Round(Data.BlastRadius, 2), math.Round(Data.BoomFillerMass * ACF.HEPower, 2))
+		State:AddNumber("Muzzle Velocity", BulletData.MuzzleVel, " m/s")
+		State:AddNumber("Max Penetration", Data.MaxPen, " mm")
+		State:AddNumber("Blast Radius", Data.BlastRadius, " m")
+		State:AddNumber("Blast Energy", BulletData.FillerMass * ACF.HEPower, " kJ")
 	end
 
 	function Ammo:Detonate(Bullet, HitPos)
@@ -245,6 +252,7 @@ if SERVER then
 		local Fragments = Bullet.CasingMass
 		local DmgInfo   = Objects.DamageInfo(Bullet.Owner, Bullet.Gun)
 
+		Bullet.KillTime = Clock.CurTime
 		Damage.createExplosion(HitPos, Filler, Fragments, nil, DmgInfo)
 
 		-- Move the jet start to the impact point and back it up by the passive standoff
@@ -309,7 +317,7 @@ if SERVER then
 			local _Cavity = Cavity -- Remove when health scales with armor
 			if DamageDealt == 0 then
 				-- This should probably be consolidated with damageresults later: lua\acf\damage\objects_sv\damage_result.lua
-				_Cavity = Cavity * (Penetration / EffectiveArmor) * 0.35
+				_Cavity = Cavity * (Penetration / EffectiveArmor) * 0.14
 
 				-- Damage result, Damage info
 				local JetDmg, JetInfo = Damage.getBulletDamage(Bullet, TraceRes)

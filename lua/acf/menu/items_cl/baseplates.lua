@@ -1,13 +1,4 @@
 local ACF = ACF
-
-local GridMaterial = CreateMaterial("acf_bp_vis_grid2", "UnlitGeneric", {
-	["$basetexture"] = "hunter/myplastic",
-	["$model"] = 1,
-	["$translucent"] = 1,
-	["$vertexalpha"] = 1,
-	["$vertexcolor"] = 1
-})
-
 local BaseplateTypes = ACF.Classes.BaseplateTypes
 
 local function CreateMenu(Menu)
@@ -15,100 +6,73 @@ local function CreateMenu(Menu)
 	ACF.SetClientData("PrimaryClass", "acf_baseplate")
 	ACF.SetClientData("SecondaryClass", "N/A")
 
+	local VerificationCtx = ACF.Classes.Entities.VerificationContext("acf_baseplate")
+	VerificationCtx:StartClientData(ACF.GetAllClientData(true))
+
 	Menu:AddTitle("#acf.menu.baseplates.settings")
+
+	Menu:AddWikiLink("Baseplates", "docs/getting_started/first_tank/baseplate_aio.html")
+
 	Menu:AddLabel("#acf.menu.baseplates.desc")
 
-	local ClassList    = Menu:AddComboBox()
-
-	local SizeX        = Menu:AddSlider("#acf.menu.baseplates.plate_width", 36, 120, 2)
-	local SizeY        = Menu:AddSlider("#acf.menu.baseplates.plate_length", 36, 420, 2)
-	local SizeZ        = Menu:AddSlider("#acf.menu.baseplates.plate_thickness", 0.5, 3, 2)
-
-	local DisableAltE  = Menu:AddCheckBox("#acf.menu.baseplates.disable_alt_e")
-	local GForceTicks = Menu:AddSlider("#acf.menu.baseplates.gforce_ticks", 1, 7, 0)
-	Menu:AddHelp("#acf.menu.baseplates.gforce_ticks_info")
+					    	   Menu:AddSimpleClassUserVar(VerificationCtx, "",                                           "BaseplateType", "Name", "Icon")
+	local SizeX              = Menu:AddNumberUserVar(     VerificationCtx, "#acf.menu.baseplates.plate_width",           "Width")
+	local SizeY              = Menu:AddNumberUserVar(     VerificationCtx, "#acf.menu.baseplates.plate_length",          "Length")
+	local SizeZ		   	     = Menu:AddNumberUserVar(     VerificationCtx, "#acf.menu.baseplates.plate_thickness",       "Thickness")
+						       Menu:AddBooleanUserVar(    VerificationCtx, "#acf.menu.baseplates.disable_alt_e",         "DisableAltE")
+	local ExplodeCollide     = Menu:AddBooleanUserVar(    VerificationCtx, "#acf.menu.baseplates.explode_on_collisions", "ExplodeOnCollisions")
+	local ExplodeCollideInfo = Menu:AddHelp("#acf.menu.baseplates.explode_on_collisions_info")
+	local GForceTicks        = Menu:AddNumberUserVar(     VerificationCtx, "#acf.menu.baseplates.gforce_ticks",   		  "GForceTicks")
+	local GForceTicksInfo    = Menu:AddHelp("#acf.menu.baseplates.gforce_ticks_info")
 
 	local BaseplateBase     = Menu:AddCollapsible("#acf.menu.baseplates.baseplate_info", nil, "icon16/shape_square_edit.png")
 	local BaseplateName     = BaseplateBase:AddTitle()
 	local BaseplateDesc     = BaseplateBase:AddLabel()
 
-	function ClassList:OnSelect(Index, _, Data)
-		if self.Selected == Data then return end
+	local PreviewSettings = {
+		FOV = 120,
+		Height = 120,
+		AngOffset = Angle(0, -90, 0),
+	}
+	local BaseplatePreview = BaseplateBase:AddModelPreview("models/holograms/cube.mdl", true, "Primary")
+	BaseplatePreview:UpdateSettings(PreviewSettings)
+	BaseplatePreview:UpdateModel("models/holograms/cube.mdl", "hunter/myplastic")
 
-		self.ListData.Index = Index
-		self.Selected       = Data
+	BaseplateName.ACF_OnUpdate = function(self, KeyChanged, _, Value) if KeyChanged == "BaseplateType" then self:SetText(Value.Name) end end
+	BaseplateDesc.ACF_OnUpdate = function(self, KeyChanged, _, Value) if KeyChanged == "BaseplateType" then self:SetText(Value.Description) end end
 
-		BaseplateName:SetText(Data.Name)
-		BaseplateDesc:SetText(Data.Description)
-
-		ACF.SetClientData("BaseplateType", Data.ID)
+	ExplodeCollide.ACF_OnUpdate   = function(self, KeyChanged, _, Value)
+		if KeyChanged == "BaseplateType" then
+			self:SetVisible(Value == BaseplateTypes.Get("Recreational"))
+			self:GetParent():InvalidateLayout()
+		end
 	end
+	ExplodeCollideInfo.ACF_OnUpdate = ExplodeCollide.ACF_OnUpdate
 
-	local Vis = BaseplateBase:AddPanel("DPanel")
-	Vis:SetSize(30, 256)
-
-	function Vis:Paint(ScrW, ScrH)
-		local W, H = SizeX:GetValue(), SizeY:GetValue()
-		self.CamDistance = math.max(W, H, 60) * 1
-
-		local Z = (math.max(1, ScrH / H) / math.max(1, ScrW / W)) * 2
-		surface.SetDrawColor(255, 255, 255)
-		surface.SetMaterial(GridMaterial)
-		surface.DrawTexturedRectRotated(ScrW / 2, ScrH / 2, W * Z, H * Z, 0)
-
-		surface.SetDrawColor(255, 70, 70); surface.DrawRect((ScrW / 2) - 1, ScrH / 2, 3, H / 2 * Z)
-		surface.SetDrawColor(70, 255, 70); surface.DrawRect(ScrW / 2, (ScrH / 2) - 1, W / 2 * Z, 3)
+	GForceTicks.ACF_OnUpdate   = function(self, KeyChanged, _, Value)
+		if KeyChanged == "BaseplateType" then
+			self:SetVisible(Value == BaseplateTypes.Get("Aircraft"))
+			self:GetParent():InvalidateLayout()
+		end
 	end
+	GForceTicksInfo.ACF_OnUpdate = GForceTicks.ACF_OnUpdate
 
-	SizeX:SetClientData("Width", "OnValueChanged")
-	SizeX:DefineSetter(function(Panel, _, _, Value)
-		local X = math.Round(Value, 2)
-
-		Panel:SetValue(X)
-
-		return X
-	end)
-
-	SizeY:SetClientData("Length", "OnValueChanged")
-	SizeY:DefineSetter(function(Panel, _, _, Value)
-		local Y = math.Round(Value, 2)
-
-		Panel:SetValue(Y)
-
-		return Y
-	end)
-
-	SizeZ:SetClientData("Thickness", "OnValueChanged")
-	SizeZ:DefineSetter(function(Panel, _, _, Value)
-		local Z = math.Round(Value, 2)
-
-		Panel:SetValue(Z)
-
-		return Z
-	end)
-
-	GForceTicks:SetClientData("GForceTicks", "OnValueChanged")
-	GForceTicks:DefineSetter(function(Panel, _, _, Value)
-		local Ticks = math.Round(Value, 0)
-
-		Panel:SetValue(Ticks)
-
-		return Ticks
-	end)
-
-	DisableAltE:SetClientData("DisableAltE", "OnChange")
+	local function UpdatePreviewSize()
+		local X, Y, Z = SizeX:GetValue(), SizeY:GetValue(), SizeZ:GetValue()
+		BaseplatePreview:SetModelScale(Vector(Y, X, Z)) -- Yes, X and Y are swapped on purpose...
+	end
+	local function ProducerSelfUpdate(Self, _, Producer) if Self == Producer then UpdatePreviewSize() end end
+	SizeX.ACF_OnUpdate = ProducerSelfUpdate
+	SizeY.ACF_OnUpdate = ProducerSelfUpdate
+	SizeZ.ACF_OnUpdate = ProducerSelfUpdate
+	UpdatePreviewSize()
 
 	local BaseplateConvertInfo = Menu:AddCollapsible("#acf.menu.baseplates.convert")
 	local BaseplateConvertText = ""
-
 	for I = 1, 6 do
 		BaseplateConvertText = BaseplateConvertText .. language.GetPhrase("acf.menu.baseplates.convert_info" .. I)
 	end
-
 	BaseplateConvertInfo:AddLabel(BaseplateConvertText)
-	local Entries = BaseplateTypes.GetEntries()
-	ACF.LoadSortedList(ClassList, Entries, "Name", "Icon")
-	ClassList:ChooseOptionID(2)
 end
 
 ACF.AddMenuItem(50, "#acf.menu.entities", "#acf.menu.baseplates", "shape_square", CreateMenu)

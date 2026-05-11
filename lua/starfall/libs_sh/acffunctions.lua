@@ -30,6 +30,7 @@ local FuelTypes         = Classes.FuelTypes
 local Gearboxes         = Classes.Gearboxes
 local Weapons           = Classes.Weapons
 local Clock             = ACF.Utilities.Clock
+local Notify            = ACF.Utilities.Notify
 local CheckLuaType      = SF.CheckLuaType
 local CheckPerms        = SF.Permissions.check
 local RegisterPrivilege = SF.Permissions.registerPrivilege
@@ -636,6 +637,13 @@ if SERVER then
 		return CreateEntity(pos, ang, data, "acf_gun", "Weapon")
 	end
 
+	--- Returns the internal torque multiplier
+	-- @server
+	-- @return number ACF.TorqueMult
+	function acf_library.getTorqueMult()
+		return ACF.TorqueMult or 1
+	end
+
 	--- Returns true if This entity contains sensitive info and is not accessable to us
 	-- @server
 	-- @return boolean True if the entity contans sensitive info
@@ -744,7 +752,7 @@ if SERVER then
 		if not IsACFEntity(This) then SF.Throw("Entity is not valid", 2) end
 		if RestrictInfo(This) then return false end
 
-		return This.IsACFWeapon or false
+		return This.IsACFGun or false
 	end
 
 	--- Returns true if the entity is an ACF turret
@@ -1010,7 +1018,7 @@ if SERVER then
 	function ents_methods:acfLinkTo(target, notify)
 		if not ACF.AllowDynamicLinking then
 			if notify then
-				ACF.SendNotify(instance.player, false, "Dynamic linking has been disabled on this server.")
+				Notify.EntityWarningToPlayer(unwrap(target), instance.player, "Dynamic linking has been disabled on this server.")
 			end
 
 			return false, "Dynamic linking has been disabled on this server."
@@ -1035,7 +1043,11 @@ if SERVER then
 		local Success, Message = This:Link(Target, true)
 
 		if notify then
-			ACF.SendNotify(instance.player, Success, Message)
+			if Success then
+				Notify.EntityNoticeToPlayer(Target, instance.player, Message)
+			else
+				Notify.EntityWarningToPlayer(Target, instance.player, Message)
+			end
 		end
 
 		return Success, Message
@@ -1064,7 +1076,11 @@ if SERVER then
 		local Success, Message = This:Unlink(Target)
 
 		if notify then
-			ACF.SendNotify(instance.player, Success, Message)
+			if Success then
+				Notify.EntityNoticeToPlayer(Target, instance.player, Message)
+			else
+				Notify.EntityWarningToPlayer(Target, instance.player, Message)
+			end
 		end
 
 		return Success, Message
@@ -1745,7 +1761,7 @@ if SERVER then
 
 		if not IsACFEntity(This) then SF.Throw("Entity is not valid", 2) end
 		if RestrictInfo(This) then return 0 end
-		if This.Fuel then return math.Round(This.Fuel, 2) end
+		if This.Amount then return math.Round(This.Amount, 2) end
 
 		local Source = ACF.GetLinkSource(This:GetClass(), "FuelTanks")
 
@@ -1754,7 +1770,7 @@ if SERVER then
 		local Fuel = 0
 
 		for Tank in pairs(Source(This)) do
-			Fuel = Fuel + Tank.Fuel
+			Fuel = Fuel + Tank.Amount
 		end
 
 		return math.Round(Fuel, 2)
@@ -1771,7 +1787,7 @@ if SERVER then
 		if not IsACFEntity(This) then SF.Throw("Entity is not valid", 2) end
 		if RestrictInfo(This) then return 0 end
 		if This.Capacity then
-			return math.Round(This.Fuel or 0 / This.Capacity, 2)
+			return math.Round((This.Amount or 0) / This.Capacity, 2)
 		end
 
 		local Source = ACF.GetLinkSource(This:GetClass(), "FuelTanks")
@@ -1783,7 +1799,7 @@ if SERVER then
 
 		for Tank in pairs(Source(This)) do
 			Capacity = Capacity + Tank.Capacity
-			Fuel = Fuel + Tank.Fuel
+			Fuel = Fuel + Tank.Amount
 		end
 
 		return math.Round(Fuel / Capacity, 2)

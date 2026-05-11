@@ -38,14 +38,12 @@ Weapons.Register("GL", {
 		Min = 7.5,
 		Max = 10,
 	},
-})
-
-Weapons.RegisterItem("40mmGL", "GL", {
-	Caliber = 40,
-})
-
-Weapons.RegisterItem("40mmCL", "GL", {
-	Caliber = 40,
+	LimitConVar = {
+		Name = "_acf_grenadelauncher",
+		Amount = 4,
+		Text = "Maximum amount of ACF grenade launchers a player can create."
+	},
+	CostScalar	= 0.5
 })
 
 ACF.SetCustomAttachment("models/launcher/40mmgl.mdl", "muzzle", Vector(19), Angle(0, 0, -180))

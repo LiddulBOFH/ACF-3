@@ -7,7 +7,7 @@ local Clock     = ACF.Utilities.Clock
 function EFFECT:Init(Data)
 	self.Index = Data:GetDamageType()
 
-	self:SetModel("models/munitions/round_100mm_shot.mdl")
+	self:SetModel("models/acf/munitions/projectile.mdl")
 
 	if not self.Index then
 		self.Kill = true
@@ -58,32 +58,40 @@ function EFFECT:Init(Data)
 		end
 
 		-- TODO: Force crates to network and store this information on the client when they're created
-		local Tracer = Crate:GetNW2Float("Tracer") > 0
+		local Tracer  = Crate:GetNW2Float("Tracer") > 0
+		local Caliber = Crate:GetNW2Float("Caliber", 10)
 		local BulletData = {
-			Index      = self.Index,
-			Crate      = Crate,
-			SimFlight  = Flight,
-			SimPos     = Origin,
-			SimPosLast = Origin,
-			Caliber    = Crate:GetNW2Float("Caliber", 10),
-			RoundMass  = Crate:GetNW2Float("ProjMass", 10),
-			FillerMass = Crate:GetNW2Float("FillerMass"),
-			WPMass     = Crate:GetNW2Float("WPMass"),
-			DragCoef   = Crate:GetNW2Float("DragCoef", 1),
-			AmmoType   = Crate:GetNW2String("AmmoType", "AP"),
-			Tracer     = Tracer and ParticleEmitter(Origin) or nil,
-			Color      = Tracer and Crate:GetColor() or nil,
-			Accel      = Crate:GetNW2Vector("Accel", ACF.Gravity),
-			LastThink  = Clock.CurTime,
-			Effect     = self,
+			Index         = self.Index,
+			Crate         = Crate,
+			SimFlight     = Flight,
+			SimPos        = Origin,
+			SimPosLast    = Origin,
+			Caliber       = Caliber,
+			RoundMass     = Crate:GetNW2Float("ProjMass", 10),
+			FillerMass    = Crate:GetNW2Float("FillerMass"),
+			WPMass        = Crate:GetNW2Float("WPMass"),
+			DragCoef      = Crate:GetNW2Float("DragCoef", 1),
+			AmmoType      = Crate:GetNW2String("AmmoType", "AP"),
+			Tracer        = Tracer and ParticleEmitter(Origin) or nil,
+			Color         = Tracer and Crate:GetColor() or nil,
+			Accel         = Crate:GetNW2Vector("Accel", ACF.Gravity),
+			LastThink     = Clock.CurTime,
+			Effect        = self,
 		}
 
 		--Add all that data to the bullet table, overwriting if needed
 		Bullets[self.Index] = BulletData
 
+		-- Set model and bodygroup based on ammo type
+		local FlightModel = Crate:GetNW2String("FlightModel", "")
+		if FlightModel ~= "" then
+			self:SetModel(FlightModel)
+			self:SetBodygroup(0, Crate:GetNW2Int("FlightBodygroup", 0))
+		end
+
 		self:SetPos(Origin)
 		self:SetAngles(Flight:Angle())
-		self:SetModelScale(BulletData.Caliber * 0.1, 0)
+		self:SetModelScale(Caliber * 0.1, 0)
 
 		self.DrawEffect = CanDraw
 

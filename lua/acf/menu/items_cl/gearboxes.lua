@@ -6,7 +6,7 @@ local StatsText = language.GetPhrase("acf.menu.gearboxes.stats")
 local function SetStatsText(GearboxStats)
 	local Mass, Torque, TorqueRating = ACF.GetGearboxStats(Current.Mass, Current.Scale, Current.MaxTorque, Current.GearCount)
 
-	GearboxStats:SetText(StatsText:format(ACF.GetProperMass(Mass), TorqueRating, Torque))
+	GearboxStats:SetText(StatsText:format(ACF.GetProperMass(Mass), TorqueRating * ACF.TorqueMult, Torque * ACF.TorqueMult))
 end
 
 local CreateSubMenu
@@ -19,6 +19,8 @@ local function CreateMenu(Menu)
 
 	Menu:AddTitle("#acf.menu.gearboxes.settings")
 	-- TODO: Remove this warning a few months after the scalable gearboxes update is added
+	Menu:AddWikiLink("Gearboxes", "docs/acf_tutorials/gearboxes.html")
+
 	Menu:AddLabel("#acf.menu.gearboxes.temp_gear_ratio_warning1")
 	Menu:AddLabel("#acf.menu.gearboxes.temp_gear_ratio_warning2")
 	Menu:AddLabel("#acf.menu.gearboxes.temp_gear_ratio_warning3")
@@ -48,12 +50,14 @@ end
 
 CreateSubMenu = function(Menu, Entries, UseLegacyRatios)
 	local GearboxClass = Menu:AddComboBox()
+	GearboxClass:SetName("GearboxClass")
 	local GearboxList = Menu:AddComboBox()
+	GearboxList:SetName("GearboxList")
 
 	local Base = Menu:AddCollapsible("#acf.menu.gearboxes.gearbox_info", nil, "icon16/chart_curve_edit.png")
 	local GearboxName = Base:AddTitle()
 	local GearboxDesc = Base:AddLabel()
-	local GearboxPreview = Base:AddModelPreview(nil, true)
+	local GearboxPreview = Base:AddModelPreview(nil, true, "Primary")
 	local GearboxStats = Base:AddLabel()
 	local GearboxScale = Base:AddSlider("#acf.menu.gearboxes.scale", ACF.GearboxMinSize, ACF.GearboxMaxSize, 2)
 	local GearAmount = Base:AddSlider("#acf.menu.gearboxes.gear_amount", 3, 10, 0)
@@ -113,6 +117,12 @@ CreateSubMenu = function(Menu, Entries, UseLegacyRatios)
 					GearboxPreview:GetEntity():SetBodygroup(1, Value and 1 or 0)
 				end)
 
+				local GhostEnt = ACF.GetGhostEntity()
+
+				if IsValid(GhostEnt) then
+					GhostEnt:SetBodygroup(1, Value and 1 or 0)
+				end
+
 				return Value
 			end)
 			Base:AddHelp("#acf.menu.gearboxes.dual_clutch_desc")
@@ -122,6 +132,12 @@ CreateSubMenu = function(Menu, Entries, UseLegacyRatios)
 
 			timer.Simple(0.05, function()
 				GearboxPreview:GetEntity():SetBodygroup(1, 0)
+
+				local GhostEnt = ACF.GetGhostEntity()
+
+				if IsValid(GhostEnt) then
+					GhostEnt:SetBodygroup(1, 0)
+				end
 			end)
 		end
 
@@ -133,6 +149,12 @@ CreateSubMenu = function(Menu, Entries, UseLegacyRatios)
 		Menu:EndTemporal(Base)
 	end
 
+	-- Set default gearbox values before linking sliders to prevent nil value errors
+	local DefaultGearboxScale = ACF.GetClientNumber("GearboxScale", (ACF.GearboxMinSize + ACF.GearboxMaxSize) / 2)
+	local DefaultGearAmount = ACF.GetClientNumber("GearAmount", (3 + 10) / 2)
+	ACF.SetClientData("GearboxScale", DefaultGearboxScale, true)
+	ACF.SetClientData("GearAmount", DefaultGearAmount, true)
+
 	GearboxScale:SetClientData("GearboxScale", "OnValueChanged")
 	GearboxScale:DefineSetter(function(Panel, _, _, Value)
 		local Scale = math.Round(Value, 2)
@@ -141,6 +163,7 @@ CreateSubMenu = function(Menu, Entries, UseLegacyRatios)
 		Current.Scale = Scale
 
 		SetStatsText(GearboxStats)
+		ACF.UpdateGhostEntity({Primary = {Scale = Vector(Scale, Scale, Scale), AbsoluteScale = true}})
 
 		return Scale
 	end)

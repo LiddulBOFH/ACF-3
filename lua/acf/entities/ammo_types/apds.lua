@@ -8,7 +8,7 @@ function Ammo:OnLoaded()
 
 	self.Name		 = "Armor Piercing Discarding Sabot"
 	self.SpawnIcon   = "acf/icons/shell_apds.png"
-	self.Model		 = "models/munitions/round_100mm_ap_shot.mdl"
+	self.Bodygroup   = 3 -- APDS bodygroup index
 	self.Description = "#acf.descs.ammo.apds"
 	self.Blacklist = ACF.GetWeaponBlacklist({
 		C = true,
@@ -53,6 +53,14 @@ function Ammo:BaseConvert(ToolData)
 end
 
 if SERVER then
+	local Conversion	= ACF.PointConversion
+
+	function Ammo:GetCost(BulletData)
+		local SabotMass	= BulletData.CartMass - BulletData.PropMass - BulletData.ProjMass
+
+		return (BulletData.ProjMass * Conversion.Steel * 6) + (BulletData.PropMass * Conversion.Propellant) + (SabotMass * Conversion.Aluminum)
+	end
+
 	function Ammo:Network(Entity, BulletData)
 		Ammo.BaseClass.Network(self, Entity, BulletData)
 

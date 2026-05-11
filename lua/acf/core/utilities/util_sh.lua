@@ -329,7 +329,7 @@ do
 		-- Gearbox -> prop connections mean that Input will be nil, because props don't have a power input
 		-- like gearboxes do. So this just switches back to the old way of checking in one direction.
 		if Input == nil then
-			if InputEntity:GetClass() == "prop_physics" then
+			if InputEntity:GetClass() ~= "acf_gearbox" then
 				local Degrees = math.deg(math.acos((InputEntity:GetPos() - OP):GetNormalized():Dot(OutputWorldDir)))
 				return Degrees
 			else
@@ -658,6 +658,7 @@ do -- Attachment storage
 	local GetAll    = EntMeta.GetAttachments
 	local Lookup    = EntMeta.LookupAttachment
 	local Models    = {}
+	local BadModels = {}
 
 	local function GetModelData(Model, NoCreate)
 		local Table = Models[Model]
@@ -701,10 +702,15 @@ do -- Attachment storage
 
 	local function GetAttachData(Entity)
 		local Model = Entity:GetModel()
+		if not Model then return end
 
-		if not Model or IsUseless(Model) then return end
+		if BadModels[Model] == nil then
+			BadModels[Model] = IsUseless(Model)
+		end
 
-		local Data  = Entity.AttachData
+		if BadModels[Model] == true then return end
+
+		local Data = Entity.AttachData
 
 		if not Data or Data.Model ~= Model then
 			local Attachments = GetModelData(Model)
@@ -974,7 +980,7 @@ do -- Crew related
 			-- Random step or Finishing step, whichever is faster.
 			local timeleft = left and math.min(left, rand) or rand
 			-- If time left then recurse, otherwise call Finish
-			if timeleft > 0.001 then
+			if timeleft > engine.TickInterval() then
 				timer.Simple(timeleft, RealLoop)
 			else
 				if Finish and not Finished then Finished = true Finish(Config) end
@@ -1099,8 +1105,6 @@ do -- Reload related
 	--- @param BulletData table Bullet data
 	--- @param Override table Override data, either from an entity or a table
 	function ACF.CalcReloadTime(Caliber, Class, Weapon, BulletData, Override)
-		if BulletData.Type == "Refill" then return 1, false end -- None of the later calculations make sense if this is a refill
-
 		-- If the weapon has a cyclic rate, use it, otherwise calculate the reload time based on the bullet data
 		local Cyclic = Override and Override.Cyclic or ACF.GetWeaponValue("Cyclic", Caliber, Class, Weapon)
 		if Cyclic then return 60 / Cyclic, false end
@@ -1120,8 +1124,6 @@ do -- Reload related
 	--- @param BulletData table Bullet data
 	--- @param Override table Override data, either from an entity or a table
 	function ACF.CalcReloadTimeMag(Caliber, Class, Weapon, BulletData, Override)
-		if BulletData.Type == "Refill" then return 1, false end -- None of the later calculations make sense if this is a refill
-
 		-- Use the override if possible
 		local MagSizeOverride = Override and Override.MagSize
 
@@ -1205,10 +1207,35 @@ do -- Reload related
 				return ACF_WirelibDetour_GetClosestRealVehicle(Vehicle, Position, Notify)
 			end
 		end
+
+		if SF then
+			local tool = weapons.GetStored("gmod_tool").Tool.starfall_component
+			if not ACF.Starfall_DetourComponentRightClick then
+				ACF.Starfall_DetourComponentRightClick = tool.RightClick
+			end
+
+			local ACF_Starfall_DetourComponentRightClick = ACF.Starfall_DetourComponentRightClick
+
+			function tool:RightClick(trace)
+				if not trace.HitPos or not (trace.Entity and trace.Entity:IsValid()) or trace.Entity:IsPlayer() then return false end
+				if CLIENT then return true end
+
+				local ent = trace.Entity
+				if self:GetStage() == 1 and self.Component:GetClass() == "starfall_hud" and ent.ACF and ent.ACF_GetSeatProxy then
+					self.Component:LinkVehicle(ent:ACF_GetSeatProxy())
+					self:SetStage(0)
+					SF.AddNotify(self:GetOwner(), "Linked to ACF baseplate vehicle successfully.", "GENERIC" , 4, "DRIP2")
+					return true
+				end
+
+				return ACF_Starfall_DetourComponentRightClick(self, trace)
+			end
+		end
 	end)
 
 	--- Configures a lua seat after it has been created.
 	--- Whenever the seat is created, this should be called after.
+	--- @param Entity any The entity to attach the seat to
 	--- @param Pod any The seat to configure
 	--- @param Player any The owner of the seat
 	function ACF.ConfigureLuaSeat(Entity, Pod, Player)
@@ -1240,21 +1267,38 @@ do -- Reload related
 end
 
 do
-	--- Sets up a table to track G forces
+	local VECTOR = FindMetaTable("Vector")
+	--- Sets up a table to track G forces. The vectors inside are mutable!! Be careful of that!!!!
+	--- (this is for performance reasons so we don't make thousands vectors per second potentially)
 	--- Use with ACF.UpdateGForceTracker to update the G force tracker.
 	--- @param pos? Vector The initial position
 	--- @param vel? Vector The initial velocity
 	--- @param accel? Vector The initial acceleration
 	--- @return nil
 	function ACF.SetupGForceTracker(pos, vel, accel)
-		return {
-			Pos = pos or vector_origin,
-			Vel = vel or vector_origin,
-			Acc = accel or vector_origin,
-			LastPos = pos or vector_origin,
-			LastVel = vel or vector_origin,
-			LastAcc = accel or vector_origin
+		local Object = {
+			Pos     = Vector(0, 0, 0),
+			Vel     = Vector(0, 0, 0),
+			Acc     = Vector(0, 0, 0),
+			LastPos = Vector(0, 0, 0),
+			LastVel = Vector(0, 0, 0),
+			LastAcc = Vector(0, 0, 0)
 		}
+		if pos then
+			VECTOR.SetUnpacked(Object.Pos, VECTOR.Unpack(pos))
+			VECTOR.SetUnpacked(Object.LastPos, VECTOR.Unpack(pos))
+		end
+
+		if vel then
+			VECTOR.SetUnpacked(Object.Vel, VECTOR.Unpack(vel))
+			VECTOR.SetUnpacked(Object.LastVel, VECTOR.Unpack(vel))
+		end
+
+		if accel then
+			VECTOR.SetUnpacked(Object.Acc, VECTOR.Unpack(accel))
+			VECTOR.SetUnpacked(Object.LastAcc, VECTOR.Unpack(accel))
+		end
+		return Object
 	end
 
 	local DeltaTime = engine.TickInterval()
@@ -1266,14 +1310,22 @@ do
 	function ACF.UpdateGForceTracker(tbl, newPos, sampleRate)
 		if not tbl then return end
 
-		tbl.Pos = newPos or tbl.Pos
-		tbl.Vel = (tbl.Pos - tbl.LastPos) / (DeltaTime * sampleRate)
-		tbl.Acc = (tbl.Vel - tbl.LastVel) / (DeltaTime * sampleRate)
+		if newPos then VECTOR.SetUnpacked(tbl.Pos, VECTOR.Unpack(newPos)) end
 
-		tbl.LastPos = tbl.Pos
-		tbl.LastVel = tbl.Vel
-		tbl.LastAcc = tbl.Acc
-		return tbl.Acc:Length() / -ACF.Gravity.z -- Since gravity is a vector...
+		VECTOR.SetUnpacked(tbl.Vel, VECTOR.Unpack(tbl.Pos))
+		VECTOR.Sub(tbl.Vel, tbl.LastPos)
+		VECTOR.Div(tbl.Vel, DeltaTime * sampleRate)
+
+		VECTOR.SetUnpacked(tbl.Acc, VECTOR.Unpack(tbl.Vel))
+		VECTOR.Sub(tbl.Acc, tbl.LastVel)
+		VECTOR.Div(tbl.Acc, DeltaTime * sampleRate)
+
+		VECTOR.SetUnpacked(tbl.LastPos, VECTOR.Unpack(tbl.Pos))
+		VECTOR.SetUnpacked(tbl.LastVel, VECTOR.Unpack(tbl.Vel))
+		VECTOR.SetUnpacked(tbl.LastAcc, VECTOR.Unpack(tbl.Acc))
+
+		local _, _, Gravity = VECTOR.Unpack(ACF.Gravity)
+		return VECTOR.Length(tbl.Acc) / -Gravity -- Since gravity is a vector...
 	end
 end
 
@@ -1299,4 +1351,63 @@ function ACF.DuplexPairs(Table1, Table2)
 	end
 
 	return Enumerator, nil, nil
+end
+
+do
+	function ACF.NiceNumber(n, round)
+		if not n then return "NULL" end
+		local s = tostring(round and math.Round(n, round) or n)
+		local sign = ""
+
+		if n < 0 then
+			sign = "-"
+			s = s:sub(2)
+		end
+
+		local integer, fraction
+		local sep = s:find("%.")
+		if sep then
+			integer = s:sub(1, sep - 1)
+			fraction = s:sub(sep + 1)
+		else
+			integer = s
+		end
+
+		-- Insert commas
+		local result = integer:reverse():gsub("(%d%d%d)", "%1,"):reverse()
+
+		if result:sub(1, 1) == "," then
+			result = result:sub(2)
+		end
+
+		return sign .. result .. (fraction and "." .. fraction or "")
+	end
+end
+
+do
+	local Offset = Vector(0, 0, 256)
+
+	--- Shared implementation of UTIL_DropToFloor (roughly).
+	--- @param Entity any The entity to try dropping to the floor
+	function ACF.DropToFloor(Entity)
+		Entity:SetGroundEntity(NULL)
+
+		local EntPos = Entity:GetPos()
+		local EntCollisionGroup = Entity:GetCollisionGroup()
+		local TraceCollisionGroup = EntCollisionGroup == COLLISION_GROUP_PUSHAWAY and COLLISION_GROUP_NONE or EntCollisionGroup
+		local Trace = util.TraceEntity({
+			start = EntPos,
+			endpos = EntPos - Offset,
+			collisiongroup = TraceCollisionGroup,
+			filter = Entity,
+		}, Entity)
+
+		if Trace.AllSolid then return -1 end
+		if Trace.Fraction == 1 then return 0 end
+
+		Entity:SetPos(Trace.HitPos)
+		Entity:SetGroundEntity(Trace.Entity)
+
+		return 1
+	end
 end

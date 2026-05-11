@@ -23,7 +23,8 @@ local function CreateMenu(Menu)
 	local Base = Menu:AddCollapsible("#acf.menu.components.component_info", nil, "icon16/drive_edit.png")
 	local ComponentName = Base:AddTitle()
 	local ComponentDesc = Base:AddLabel()
-	local ComponentPreview = Base:AddModelPreview(nil, true)
+	local ComponentPreview = Base:AddModelPreview(nil, true, "Primary")
+	Base.ComponentPreview = ComponentPreview
 
 	function ComponentClass:OnSelect(Index, _, Data)
 		if self.Selected == Data then return end
@@ -50,7 +51,7 @@ local function CreateMenu(Menu)
 		ComponentName:SetText(Data.Name)
 		ComponentDesc:SetText(Data.Description or "#acf.menu.no_description_provided")
 
-		ComponentPreview:UpdateModel(Data.Model)
+		ComponentPreview:UpdateModel(Data.Model, Data.Material or "")
 		ComponentPreview:UpdateSettings(Data.Preview)
 
 		Menu:ClearTemporal(Base)
@@ -59,6 +60,8 @@ local function CreateMenu(Menu)
 		local CustomMenu = Data.CreateMenu or ClassData.CreateMenu
 
 		if CustomMenu then
+			local TutorialURL = Data.TutorialURL or ClassData.TutorialURL
+			if TutorialURL then Base:AddWikiLink(Data.Name, TutorialURL) end
 			CustomMenu(Data, Base)
 		end
 

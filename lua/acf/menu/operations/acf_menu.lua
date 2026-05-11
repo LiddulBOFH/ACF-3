@@ -65,9 +65,9 @@ do -- Generic Spawner/Linker operation creator
 		if Success then
 			local PhysObj = Result:GetPhysicsObject()
 			if Result.ACF_PostMenuSpawn then
-				Result:ACF_PostMenuSpawn()
+				Result:ACF_PostMenuSpawn(Trace)
 			else
-				Result:DropToFloor()
+				ACF.DropToFloor(Result)
 			end
 			Result:SetSpawnEffect(true)
 
@@ -96,8 +96,19 @@ do -- Generic Spawner/Linker operation creator
 		end
 	end
 
+	local function UnselectAllEntities(Tool)
+		local Player = Tool:GetOwner()
+		local Ents   = GetPlayerEnts(Player)
+
+		if not next(Ents) then return end
+
+		for Entity in pairs(Ents) do
+			UnselectEntity(Entity, Name, Tool)
+		end
+	end
+
 	local function SelectEntity(Entity, Name, Tool)
-		if not IsValid(Entity) then return false end
+		if not ACF.Check(Entity) then return false end
 
 		local Player = Tool:GetOwner()
 		local Ents   = GetPlayerEnts(Player)
@@ -178,6 +189,8 @@ do -- Generic Spawner/Linker operation creator
 		local Total    = 0
 
 		for K in pairs(Ents) do
+			if not ACF.Check(K) then continue end
+
 			local EntFunc = OnKey and K.Unlink or K.Link
 			local Result  = false
 			local Message
@@ -204,6 +217,8 @@ do -- Generic Spawner/Linker operation creator
 			UnselectEntity(K, Name, Tool)
 		end
 
+		if Total == 0 then return end
+
 		if Total > 1 then
 			ReportMultiple(Player, Action, EntName, Failed, #Success, Total)
 		else
@@ -216,10 +231,10 @@ do -- Generic Spawner/Linker operation creator
 		end
 	end
 
-	--- Creates a menu operation  
-	--- Mostly serves as a wrapper for (https://wiki.facepunch.com/gmod/Tool_Information_Display)  
-	--- Internally links the helpers SpawnEntity and SelectEntity to your left and right mouse  
-	--- To actually define an entity's linking or spawn behaviour, use the entity files (e.g. init.lua)  
+	--- Creates a menu operation
+	--- Mostly serves as a wrapper for (https://wiki.facepunch.com/gmod/Tool_Information_Display)
+	--- Internally links the helpers SpawnEntity and SelectEntity to your left and right mouse
+	--- To actually define an entity's linking or spawn behaviour, use the entity files (e.g. init.lua)
 	--- @param Name string The name of the link type performed by the toolgun (e.g. Weapon, Engine, etc.)
 	--- @param Primary string The type of the entity to be spawned on left click (purely aesthetical)
 	--- @param Secondary string | nil The type of entity to be spawned on shift + right click (purely aesthetical)
@@ -239,7 +254,15 @@ do -- Generic Spawner/Linker operation creator
 
 					-- The call to SelectEntity will switch the mode to the linker
 					return SelectEntity(Entity, Name, Tool)
-				end
+				end,
+				OnDeploy     = ACF.CreateGhostEntity,
+				OnHolster    = ACF.ReleaseGhostEntity,
+				OnEnterOp    = ACF.CreateGhostEntity,
+				OnExitOp     = ACF.ReleaseGhostEntity,
+				OnThink      = function(Tool)
+					ACF.RenderGhostEntity(Tool)
+					ACF.RunHoldOverlay(Tool)
+				end,
 			})
 
 			ACF.RegisterToolInfo("acf_menu", "Spawner", Name, {
@@ -268,7 +291,7 @@ do -- Generic Spawner/Linker operation creator
 
 					local Entity = Trace.Entity
 
-					if not IsValid(Entity) then return false end
+					if not ACF.Check(Entity) then return false end
 
 					local Player = Tool:GetOwner()
 					local Ents   = GetPlayerEnts(Player)
@@ -287,16 +310,8 @@ do -- Generic Spawner/Linker operation creator
 
 					return true
 				end,
-				OnHolster = function(Tool)
-					local Player = Tool:GetOwner()
-					local Ents   = GetPlayerEnts(Player)
-
-					if not next(Ents) then return end
-
-					for Entity in pairs(Ents) do
-						UnselectEntity(Entity, Name, Tool)
-					end
-				end,
+				OnHolster = UnselectAllEntities,
+				OnExitOp = UnselectAllEntities,
 			})
 
 			ACF.RegisterToolInfo("acf_menu", "Linker", Name, {
@@ -366,13 +381,16 @@ ACF.CreateMenuOperation("2-Motor", "turret motor")
 ACF.CreateMenuOperation("3-Gyro", "turret gyroscope")
 ACF.CreateMenuOperation("4-Computer", "turret computer")
 
+local Notify = ACF.Utilities.Notify
 ACF.CreateMenuOperation("Baseplate", "baseplate", nil, {
 	Text = "Attempts to convert the target entity into a baseplate.",
 	Func = function(Tool, Trace)
 		if CLIENT then return end
-		local success, msg = ACF.ConvertEntityToBaseplate(Tool.SWEP:GetOwner(), Trace.Entity)
+		local success, msg = ACF.ConvertBaseplate(Tool.SWEP:GetOwner(), Trace.Entity)
 		if not success then
-			ACF.SendNotify(Tool:GetOwner(), err, "[ACF] Could not convert baseplate: " .. msg)
+			Notify.WarningToPlayer(Tool:GetOwner(), "Could not convert", msg)
+		else
+			Notify.NoticeToPlayer(Tool:GetOwner(), "Successfully converted the entity.")
 		end
 	end
 })

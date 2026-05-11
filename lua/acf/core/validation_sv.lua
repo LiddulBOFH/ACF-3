@@ -3,12 +3,16 @@
 -- Local Vars -----------------------------------
 local ACF          = ACF
 local Contraption  = ACF.Contraption
+local ModelData	   = ACF.ModelData
+local Notify       = ACF.Utilities.Notify
 local StringFind   = string.find
 local TimerSimple  = timer.Simple
 local Baddies	   = ACF.GlobalFilter
 local BaddiesLess  = ACF.ArmorableGlobalFilterExceptions
 local MinimumArmor = ACF.MinimumArmor
 local MaximumArmor = ACF.MaxThickness
+
+util.AddNetworkString("ACF_Error_Entity")
 
 -- This particular message needs a delay in order to avoid erroneous shaming
 local function ShameNotSolid(Entity)
@@ -37,6 +41,7 @@ end
 ]]--
 function ACF.IsLegal(Entity)
 	if not ACF.LegalChecks then return true end -- Legal checks are disabled
+	if Entity.ACF_IsNotLegalityChecked then return true end -- This entity is exempt from legality checks
 
 	local EntTbl = Entity:GetTable()
 	local Phys = Entity:GetPhysicsObject()
@@ -51,7 +56,7 @@ function ACF.IsLegal(Entity)
 	end
 	if not Entity:IsSolid() then ShameNotSolid(Entity) return false, "Not Solid", "The entity is invisible to projectiles." end
 	if EntTbl.ClipData and next(EntTbl.ClipData) then ACF.Shame(Entity, "having visclips.") return false, "Visual Clip", "Visual clip cannot be applied to ACF entities." end -- No visclip
-	if not ACF.GunsCanFire and EntTbl.IsACFWeapon then return false, "Cannot fire", "Firing disabled by the server's ACF settings." end
+	if not ACF.GunsCanFire and EntTbl.IsACFGun then return false, "Cannot fire", "Firing disabled by the server's ACF settings." end
 	if not ACF.RacksCanFire and EntTbl.IsRack then return false, "Cannot fire", "Firing disabled by the server's ACF settings." end
 
 	local Legal, Reason, Message, Timeout
@@ -87,18 +92,18 @@ function ACF.DisableEntity(Entity, Reason, Message, Timeout)
 		Entity:Disable() -- Let the entity know it's disabled
 		if Entity.UpdateOverlay then Entity:UpdateOverlay(true) end -- Update overlay if it has one (Passes true to update overlay instantly)
 		if IsValid(Owner) and tobool(Owner:GetInfo("acf_legalhints")) then -- Notify the owner
-			local Name = Entity.WireDebugName .. " [" .. Entity:EntIndex() .. "]"
-
 			if Reason == "Not Solid" then -- Thank you garry, very cool
 				timer.Simple(1.1, function() -- Remover tool sets nodraw and removes 1 second later, causing annoying alerts
 					if not IsValid(Entity) then return end
 
-					ACF.SendNotify(Owner, false, Name .. " has been disabled: " .. Message)
+					Notify.EntityDisabledToPlayer(Entity, Owner, Message)
 				end)
 			else
-				ACF.SendNotify(Owner, false, Name .. " has been disabled: " .. Message)
+				Notify.EntityDisabledToPlayer(Entity, Owner, Message)
 			end
 		end
+		-- Send the entity to the client
+		net.Start("ACF_Error_Entity") net.WriteEntity(Entity) net.Send(Entity:CPPIGetOwner())
 	end
 
 	if Timeout then Timeout = math.max(Timeout, 1) end
@@ -227,7 +232,7 @@ function ACF.Check(Entity, ForceUpdate) -- IsValid but for ACF
 	local EntACF = Entity.ACF
 
 	if not EntACF then
-		if Entity:IsWorld() or Entity:IsWeapon() or StringFind(Class, "func_") then
+		if Entity:IsWorld() or Entity:IsWeapon() or Entity:GetBrushPlaneCount() > 0 or StringFind(Class, "func_") then
 			Baddies[Class] = true
 
 			return false
@@ -251,6 +256,8 @@ function ACF.Activate(Entity, Recalc)
 
 	if not IsValid(PhysObj) then return end
 	if not EntTbl.ACF then EntTbl.ACF = {} end
+
+	ModelData.Populate(Entity:GetModel())
 
 	EntTbl.ACF.Type    = ACF.GetEntityType(Entity)
 	EntTbl.ACF.PhysObj = PhysObj

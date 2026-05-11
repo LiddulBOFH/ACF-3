@@ -3,7 +3,7 @@ local function CreateMenu(Menu)
 	Menu:AddLabel("#acf.menu.contact.desc2")
 
 	do -- Official Discord Server
-		local Base = Menu:AddCollapsible("#acf.menu.contact.discord", false, "icon16/server.png")
+		local Base = Menu:AddCollapsible("#acf.menu.contact.discord", true, "icon16/server.png")
 
 		Base:AddLabel("#acf.menu.contact.discord_desc")
 
@@ -15,7 +15,7 @@ local function CreateMenu(Menu)
 	end
 
 	do -- Official Steam Group
-		local Base = Menu:AddCollapsible("#acf.menu.contact.steam", false, "vgui/resource/icon_steam")
+		local Base = Menu:AddCollapsible("#acf.menu.contact.steam", true, "vgui/resource/icon_steam")
 
 		Base:AddLabel("#acf.menu.contact.steam_desc")
 
@@ -24,6 +24,21 @@ local function CreateMenu(Menu)
 		function Link:DoClickInternal()
 			gui.OpenURL("https://steamcommunity.com/groups/officialacf")
 		end
+	end
+
+	do -- Online wiki
+		local Base = Menu:AddCollapsible("#acf.menu.wiki", true, "icon16/book_open.png")
+
+		Base:AddLabel("#acf.menu.wiki.desc1")
+		Base:AddLabel("#acf.menu.wiki.desc2")
+
+		local Wiki = Base:AddButton("#acf.menu.wiki.open")
+
+		function Wiki:DoClickInternal()
+			gui.OpenURL("https://acf-team.github.io/Wiki/")
+		end
+
+		Menu:AddHelp("#acf.menu.wiki.wip_notice")
 	end
 
 	do -- "Github Issues & Suggestions"
@@ -52,4 +67,4 @@ local function CreateMenu(Menu)
 	end
 end
 
-ACF.AddMenuItem(301, "#acf.menu.about", "#acf.menu.contact", "feed", CreateMenu)
+ACF.AddMenuItem(2, "#acf.menu.about", "#acf.menu.contact", "feed", CreateMenu)

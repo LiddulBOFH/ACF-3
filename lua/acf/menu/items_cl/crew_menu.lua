@@ -8,7 +8,7 @@ local table_empty = {}
 -- todo: outfitter, fittr support?
 -- local MODEL_SOURCE_STANDARD = 0
 
-function OpenPmSelector(PlayerModelTxtbox, PlayerModelBodygroups, PlayerModelSkin)
+local function OpenPmSelector(PlayerModelTxtbox, PlayerModelBodygroups, PlayerModelSkin)
 	local Selector = vgui.Create("DFrame")
 	Selector:SetSize(ScrW() / 2.25, ScrH() / 1.5)
 	Selector:MakePopup()
@@ -21,14 +21,14 @@ function OpenPmSelector(PlayerModelTxtbox, PlayerModelBodygroups, PlayerModelSki
 	Selector:SetIcon("icon16/user_suit.png")
 	Selector:SetTitle("ACF - Crew Playermodel Selector")
 
-	local Sheet = Selector:Add "DPropertySheet"
+	local Sheet = Selector:Add("DPropertySheet")
 	Sheet:Dock(FILL)
 
 	do
-		local PlayermodelsPanel = Sheet:Add "DPanel"
+		local PlayermodelsPanel = Sheet:Add("DPanel")
 		Sheet:AddSheet("Standard Playermodels", PlayermodelsPanel, "icon16/user.png")
 
-		local ModelView = PlayermodelsPanel:Add "DModelPanel"
+		local ModelView = PlayermodelsPanel:Add("DModelPanel")
 		ModelView:Dock(LEFT)
 		ModelView:SetSize(400, 0)
 		ModelView:SetFOV(36)
@@ -61,8 +61,8 @@ function OpenPmSelector(PlayerModelTxtbox, PlayerModelBodygroups, PlayerModelSki
 		ExtraModelInfo:Dock(BOTTOM)
 		ExtraModelInfo:SetSize(0, 150)
 
-		for name, model in SortedPairs( player_manager.AllValidModels() ) do
-			local Icon = vgui.Create "SpawnIcon"
+		for name, model in SortedPairs(player_manager.AllValidModels()) do
+			local Icon = vgui.Create("SpawnIcon")
 			Icon:SetModel(model)
 			Icon:SetSize(64, 64)
 			Icon:SetTooltip(name)
@@ -177,7 +177,7 @@ local function CreateMenu(Menu)
 
 	local Base			= Menu:AddCollapsible("#acf.menu.crew.crew_info", nil, "icon16/group_edit.png")
 	local CrewName		= Base:AddTitle()
-	local CrewPreview	= Base:AddModelPreview(nil, true)
+	local CrewPreview	= Base:AddModelPreview(nil, true, "Primary")
 	local ReplaceOthers	= Base:AddCheckBox("#acf.menu.crew.replace_others")
 	local ReplaceSelf	= Base:AddCheckBox("#acf.menu.crew.replace_self")
 	local UseAnimation	= Base:AddCheckBox("#acf.menu.crew.use_animation")
@@ -323,9 +323,9 @@ local function CreateMenu(Menu)
 		if CrewModel.Selected and CrewJob.Selected then Pose:SetText(language.GetPhrase("acf.menu.crew.model_efficiency"):format(CrewModel.Selected.BaseErgoScores[CrewJob.Selected.ID] or 1)) end
 
 		ACF.SetClientData("CrewModelID", Data.ID)
-		ACF.LoadSortedList(PlayerPose, CrewPoses.GetItemEntries(Data.ID), "Name")
 	end
 
+	ACF.LoadSortedList(PlayerPose, CrewPoses.GetEntries(), "Name")
 	ACF.LoadSortedList(CrewJob, CrewTypes.GetEntries(), "ID", "Icon")
 	ACF.LoadSortedList(CrewModel, CrewModels.GetEntries(), "ID")
 end

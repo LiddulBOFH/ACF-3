@@ -8,7 +8,7 @@ function Ammo:OnLoaded()
 
 	self.Name		 = "Armor Piercing Composite Rigid"
 	self.SpawnIcon   = "acf/icons/shell_apcr.png"
-	self.Model		 = "models/munitions/round_100mm_ap_shot.mdl"
+	self.Bodygroup   = 2 -- APCR bodygroup index
 	self.Description = "#acf.descs.ammo.apcr"
 	self.Blacklist = ACF.GetWeaponBlacklist({
 		C = true,
@@ -51,6 +51,13 @@ function Ammo:BaseConvert(ToolData)
 end
 
 if SERVER then
+	local Conversion	= ACF.PointConversion
+
+	-- Since APCR
+	function Ammo:GetCost(BulletData)
+		return (BulletData.ProjMass * Conversion.Steel * 2.5) + (BulletData.PropMass * Conversion.Propellant)
+	end
+
 	function Ammo:Network(Entity, BulletData)
 		Ammo.BaseClass.Network(self, Entity, BulletData)
 
