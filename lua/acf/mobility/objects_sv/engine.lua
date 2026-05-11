@@ -7,7 +7,7 @@ local Objects	= ACF.Mobility.Objects
 --local Clamp		= math.Clamp
 local max		= math.max
 local pi		= math.pi
-local DryGasConstant	= 286.9 -- J/kgK
+local DryGasConstant	= 286.9 -- J/kgK, for air
 
 --	Other fuels, just a central spot to find this link
 --	https://www.engineeringtoolbox.com/alternative-fuels-d_1221.html
@@ -33,6 +33,8 @@ local DryGasConstant	= 286.9 -- J/kgK
 
 --	https://hpwizard.com/engine.html some good reads
 --	https://books.google.com/books?id=rvD_kLm180YC&printsec=frontcover#v=onepage&q&f=false more good reads
+--	https://www.performancetrends.com/
+--	https://www.carthrottle.com/news/engineering-explained-gasoline-vs-diesel-engines
 
 -- Predetermined patterns for engines?
 --[[
@@ -53,6 +55,19 @@ local DryGasConstant	= 286.9 -- J/kgK
 
 	Gasoline:	14.7 : 1 	- Burns very hot at this, and is usually not actually reached unless under light loads
 	Diesel		14.5 : 1	- Burns as it is injected, and usually has an abundance of air making it very lean
+
+	For ease of simulation, *everything* is direct injection (carbs would be nice to do eventually though)
+
+	Will need to figure out an "upper" end to injection rates, maybe another option for players to have?
+	Should provide it nonetheless since turbochargers/superchargers are definitely a possibility
+	At the same time it should be easy to figure out what a "default" value should be for a given size
+		-- Second thought on this, maybe not worry about flow rates, and base it off of ideal AFR, considering throttle and engine state?
+
+	For gasoline engines, there will be a throttle plate for the air intake to control that, as well as automatic injection control based on throttle
+	For diesel engines and similar, there will not be a throttle plate (or make it an option), and automatic injection control based on throttle
+
+	Since airflow is being roughly calculated, this also opens up the possibility of positive pressure intake (supercharger/turbocharger), as well as exhaust entities with correct flowrates and appearance
+	Also consider intercoolers? Would be necessary as the air is heated up as it is compressed, which can be partly eliminated by cooling it before reaching the engine, so it is denser and better
 ]]
 
 --[[
@@ -65,9 +80,6 @@ local DryGasConstant	= 286.9 -- J/kgK
 	O | || |
 	K | || |
 	E | || |
-
-
-	Since airflow is being roughly calculated, this also opens up the possibility of positive pressure intake (supercharger/turbocharger), as well as exhaust entities with correct flowrates and appearance
 
 ]]
 
@@ -104,9 +116,10 @@ function Objects.Engine(EngineData)
 
 	Engine.CompressionRatio	= Engine.CylinderVolume / Engine.ClearanceVolume
 
-	Engine.IntakeVolume		= Engine.Displacement * 0.75			-- Really crude way to do this, but I need *something* without yet another user variable
-
 	Engine.CRotPerCycle		= 2 -- 2 rotations per cycle for 4-stroke
+
+	-- Set this based on fuel type? This determines if the air intake has a throttle plate
+	Engine.HasThrottlePlate	= true
 
 	setmetatable(Engine, Meta)
 
@@ -118,6 +131,80 @@ AccessorFunc(Meta, "Active", "Active", FORCE_BOOL)
 AccessorFunc(Meta, "Clutch", "Clutch", FORCE_NUMBER)
 AccessorFunc(Meta, "Throttle", "Throttle", FORCE_NUMBER)
 AccessorFunc(Meta, "LastThink", "LastThink", FORCE_NUMBER)
+
+function Meta:MeanPistonSpeed() -- Piston speed, m/s
+	return 2 * (self.Stroke / 100) * (self:RPM() / 60)
+end
+
+function Meta:RPM()
+	return max(self.FlyRPM, 1)
+end
+
+function Meta:RadS()
+	return (pi * self:RPM()) / 30
+end
+
+function Meta:FlyEnergy()	-- Current energy of the flywheel (using solid cylinder)
+	return 0.5 * self.FlyMOI * self:RadS()
+end
+
+-- A gross approximation of power, being used with our approximation of BMEP (which in itself is an approximation of friction losses versus IMEP, which too is an approximation. We love approximation here.)
+function Meta:Power()
+	local i		= 0.5 -- Cycles per revolution
+	local Vd	= self.Displacement	-- Displacement
+	local n		= self:RPM() / 60 -- Revs per second
+	local Pme	= self:BrakeMeanEffectivePressure() / 1000
+
+	--print(i, Vd, n, Pme)
+
+	-- https://en.wikipedia.org/wiki/Mean_effective_pressure
+	-- Returns in kW
+	return (i * Vd * n * Pme) / 1000
+end
+
+function Meta:Torque()
+	return 9548.8 * self:Power() / max(self:RPM(), 1)
+end
+
+-- To be made dynamic, for purposes of boosting
+-- Can also be an entry point for infmaps with atmosphere thinning from altitude
+-- Temperature can also be dynamic by map, but will need a system for saving info like that per-map
+-- These values should also be used as standard temperature and pressure, for purposes of peak air flow
+local AirPressure	= 101.3 -- kPa
+local AirTemp		= 25 -- Celsis
+local STPD			= (AirPressure * 1000) / (DryGasConstant * (AirTemp + 273.15))		-- Standard density at standard temperature/pressure
+
+-- https://x-engineer.org/calculate-volumetric-efficiency/
+function Meta:DoIntake()
+	local Throttle		= self:GetThrottle()
+	local Pressure		= AirPressure * (self.HasThrottlePlate and Throttle or 1)
+
+	-- Adjust AirTemp by engine temperature slightly (as the intake manifold gets hot too)
+	local AirDensity	= (Pressure * 1000) / (DryGasConstant * (AirTemp + 273.15))	-- kg/m^3
+	local RPS			= self:RPM() / 60
+
+	local AirMass		= AirDensity * self.CylinderVolume
+	local MassAirFlow	= (AirMass * RPS) / self.CRotPerCycle
+
+	local PeakAirMass	= STPD * self.CylinderVolume
+	local PeakAirFlow	= (PeakAirMass * RPS) / self.CRotPerCycle
+
+	local Efficiency	= (MassAirFlow * self.CRotPerCycle) / (AirDensity * (self.Displacement * 1e-6) * RPS)
+
+	return {
+		MassAirFlow = MassAirFlow,			-- kg/s Air flow
+		PeakAirFlow = PeakAirFlow,			-- kg/s Peak air flow (for load calculation)
+		Density = AirDensity,				-- kg/m^3 Density of air in intake
+		Pressure = Pressure,				-- kPa of air in intake
+		VolumetricEfficiency = Efficiency	-- percentage of how much air is actually making it through the engine compared to the peak flow at standard temperature/pressure
+	}
+end
+
+function Meta:Load(Intake)	-- Won't currently be used for anything, but this would be nice to pass along to players as it is a direct indicator of how an engine is performing
+	return Intake.MassAirFlow / Intake.PeakAirFlow
+end
+
+-- TODO: Actually finish energy release from fuel combustion (with efficiency loss, as engines are pretty horrible about converting chemical energy)
 
 --	Energy density of the fuel used in the engine
 --	This is NOT all applied, some of this energy is lost due to inefficiency (heating cylinder walls, piston head, etc) instead of heating the gas
@@ -133,7 +220,6 @@ function Meta:ConsumeFuel(Intake)
 	return (Intake.PeakAirFlow / 14.7) * self.Throttle -- just something for now, this will be dynamic later
 end
 
---
 --	https://web.archive.org/web/20070206060439/http://www.tech.plym.ac.uk/sme/ther305-web/Combust1.PDF
 --	https://x-engineer.org/fuel-conversion-efficiency/
 --	https://x-engineer.org/air-fuel-ratio/
@@ -153,45 +239,6 @@ function Meta:Combust(Intake)
 		Energy	= self:FuelEnergy() * FuelMass * math.max(AFR / FuelStoich, 1)
 	}
 end
-
-
--- To be made dynamic, for purposes of boosting
--- Can also be an entry point for infmaps with atmosphere thinning from altitude
--- Temperature can also be dynamic by map, but will need a system for saving info like that per-map
-local AirPressure	= 99 -- kPa
-local AirTemp		= 21.1 -- Celsis
-
--- https://x-engineer.org/calculate-volumetric-efficiency/
-function Meta:DoIntake()
-	local Pressure		= AirPressure * self:GetThrottle()
-
-	-- Adjust AirTemp by engine temperature slightly (as the intake manifold gets hot too)
-	local AirDensity	= (Pressure * 1000) / (DryGasConstant * (AirTemp + 273.15))	-- kg/m^3
-	local RPS			= self:RPM() / 60
-
-	-- ya, sue me, I need a way to approximate this somehow
-	local Intake		= self.IntakeVolume * self.Throttle
-	local AirMass		= AirDensity * Intake
-	local PeakAirMass	= AirDensity * self.IntakeVolume
-	local MassAirFlow	= (AirMass * RPS) / self.CRotPerCycle
-	local PeakAirFlow	= (PeakAirMass * RPS) / self.CRotPerCycle
-
-	local Efficiency	= (MassAirFlow * self.CRotPerCycle) / (AirDensity * (self.Displacement * 1e-6) * RPS)
-
-	return {
-		MassAirFlow = MassAirFlow,			-- kg/s Air flow
-		PeakAirFlow = PeakAirFlow,			-- kg/s Peak air flow (for load calculation)
-		Density = AirDensity,				-- kg/m^3 Density of air in intake
-		Pressure = Pressure,				-- kPa of air in intake
-		VolumetricEfficiency = Efficiency	-- percentage of how much air is actually making it through the engine compared to the peak flow at standard temperature/pressure
-	}
-end
-
-function Meta:MeanPistonSpeed() -- Piston speed, m/s
-	return 2 * (self.Stroke / 100) * (self:RPM() / 60)
-end
-
--- TODO: Actually finish energy release from fuel combustion (with efficiency loss)
 
 function Meta:IndicatedMeanEffectivePressure(Intake)
 	return Intake.Pressure * self.CylinderVolume / self.ClearanceVolume
@@ -232,40 +279,6 @@ end
 
 function Meta:BrakeMeanEffectivePressure(Intake) -- Not *technically* correct to do, but its in a game, we have to approximate somewhere
 	return self:IndicatedMeanEffectivePressure(Intake) - self:FrictionMeanEffectivePressure()
-end
-
-function Meta:Load(Intake)
-	return Intake.MassAirFlow / Intake.PeakAirFlow
-end
-
-function Meta:RPM()
-	return max(self.FlyRPM, 1)
-end
-
-function Meta:RadS()
-	return (pi * self:RPM()) / 30
-end
-
-function Meta:FlyEnergy()	-- Current energy of the flywheel (using solid cylinder)
-	return 0.5 * self.FlyMOI * self:RadS()
-end
-
--- A gross approximation of power, being used with our approximation of BMEP (which in itself is an approximation of friction losses versus IMEP, which too is an approximation. We love approximation here.)
-function Meta:Power()
-	local i		= 0.5 -- Cycles per revolution
-	local Vd	= self.Displacement	-- Displacement
-	local n		= self:RPM() / 60 -- Revs per second
-	local Pme	= self:BrakeMeanEffectivePressure() / 1000
-
-	--print(i, Vd, n, Pme)
-
-	-- https://en.wikipedia.org/wiki/Mean_effective_pressure
-	-- Returns in kW
-	return (i * Vd * n * Pme) / 1000
-end
-
-function Meta:Torque()
-	return 9548.8 * self:Power() / max(self:RPM(), 1)
 end
 
 function Meta:Run()
